@@ -1,0 +1,51 @@
+[package]
+name = "ionlauncher"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+description = "A fast, lightweight unified game launcher for Steam, Epic Games and GOG"
+license = "GPL-2.0-or-later"
+repository = "https://github.com/ciao22king/IonLauncher"
+readme = "README.md"
+keywords = ["launcher", "steam", "epic", "gog", "gaming"]
+categories = ["gui", "games"]
+
+[[bin]]
+name = "ionlauncher"
+path = "src/main.rs"
+
+[dependencies]
+# GPU-accelerated native UI. `glow` = OpenGL backend: it starts fast and runs
+# well on integrated/older GPUs, unlike the heavier wgpu path.
+eframe = { version = "0.37", default-features = false, features = [
+    "glow",
+    "default_fonts",
+    "x11",
+    "wayland",
+] }
+egui = "0.37"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Small blocking HTTP client, used only for artwork fallback downloads.
+ureq = "2"
+
+# Artwork decoding. Only the formats real store CDNs actually serve.
+image = { version = "0.25", default-features = false, features = [
+    "jpeg",
+    "png",
+    "webp",
+] }
+
+dirs = "6"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
