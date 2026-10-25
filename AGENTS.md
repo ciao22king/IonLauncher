@@ -222,6 +222,28 @@ The user may not see the tool calls, so the last message has to stand alone.
 - Keep numbers in a short table or on their own line, and only when they change
   what the reader does.
 
+## Windows packaging
+
+- `build.rs` embeds the icon and version metadata. It runs `windres` for the
+  target architecture and passes the compiled `.res` to the linker. A missing
+  or failing `windres` only warns; the binary still builds, just without an
+  icon. Nothing runs on non-Windows targets.
+- `installer/ionlauncher.nsi` is a MUI2 wizard. Verify it under Wine with a
+  throwaway prefix, then drive the pages with `xdotool` and read the result
+  from the filesystem; do not trust a screenshot alone.
+- Keep nsDialogs control handles in `Var`s, never in `$0`-`$9`. MUI reuses
+  those registers between pages, so a handle kept there is clobbered before the
+  leave function reads it and the user's shortcut choice is silently lost.
+- The installer runs elevated, so set `SetShellVarContext all` before creating
+  or deleting shortcuts. Without it `$DESKTOP` and `$SMPROGRAMS` point at the
+  administrator's profile and the shortcuts never appear for the user.
+- Build a 64-bit stub (`Target amd64-unicode`). The app is x86_64, so a 32-bit
+  stub has nothing to install and mishandles the Program Files redirects.
+- An already-running copy of the app locks `ionlauncher.exe`, so the file copy
+  fails and the shortcut section is skipped. Close it before reinstalling.
+- The CI workflow builds the installer on every push and attaches it to tagged
+  releases. `dist/` is ignored; the installer is a build product.
+
 ## Style
 
 - Comment the why, never the what. Do not narrate the diff or restate the code.
