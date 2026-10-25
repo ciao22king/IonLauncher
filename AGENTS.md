@@ -87,6 +87,50 @@ This version differs from most tutorials, so do not copy older examples:
   a Proton download) needs `Context::request_repaint_after` from the frame
   loop, or results arrive on their channel but the window never redraws.
 
+## How to work
+
+How to approach the job. The next section is code style.
+
+- Act on the request as stated. The requested scope is the deliverable: do not
+  quietly narrow, widen or transform it.
+- When you have enough information to act, act. Do not re-derive facts already
+  settled, re-open a decision the user has made, or list options you will not
+  take. If you are weighing a choice, give a recommendation, not a survey.
+- Make routine judgment calls yourself. Ask only when two readings would lead to
+  materially different work.
+- Finish the whole task, not just the easy parts. Report completion only when it
+  is complete.
+- If one part is blocked, finish every other part in full, then say plainly what
+  you left out and why. Shrinking the scope is the user's call, not yours.
+- On an uncertainty mid-task, do everything that does not depend on the answer
+  first, then ask at the point where it actually matters.
+- Report outcomes faithfully. If tests fail, say so and show the output. If a
+  step was skipped, say that. When something is done and verified, state it
+  plainly without hedging.
+- Before deleting or overwriting anything, look at the target first. For actions
+  that are hard to reverse or outward-facing, confirm first unless durably
+  authorized. Approval in one context does not extend to the next.
+- Reference code as `file_path:line_number` so the reader can click it.
+- Never end a turn on a plan, an analysis or a promise. If the last paragraph is
+  next steps or "I will", do that work now with tool calls.
+
+### Writing the final message
+
+The user may not see the tool calls, so the last message has to stand alone.
+
+- Lead with the outcome. If something could not be verified, say that first.
+- One idea per sentence, about twenty words. A sentence beats a label with a
+  colon.
+- State facts and conclusions. Do not narrate your own reasoning, and do not
+  open by announcing that no tools were needed.
+- Do not close by restating what you did or offering a follow-up.
+- Use a list for parallel items: findings, steps, files to look at. A single
+  point stays in prose.
+- Keep code out of prose. Put commands, snippets and error text in a fenced
+  block. Name a file or flag only when the reader has to go there.
+- Keep numbers in a short table or on their own line, and only when they change
+  what the reader does.
+
 ## Style
 
 - Comment the why, never the what. Do not narrate the diff or restate the code.
@@ -97,3 +141,18 @@ This version differs from most tutorials, so do not copy older examples:
   and fast; weigh every new crate against that.
 - Store-specific knowledge (file formats, registry keys, database schemas)
   belongs in `providers/`, not in the UI or model.
+
+## Git
+
+- Commit or push only when the user asks, unless the session already
+  established that as the working agreement.
+- Keep each fix minimal: what the failure or the review comment needs, no more.
+  Do not widen the change on your own.
+- Before pushing, run the repo's own fast checks and prove the change is sound:
+  `cargo test`, `cargo clippy --all-targets`, `cargo fmt --check`. Re-read your
+  own diff adversarially and fix what you find first. One validated push beats
+  three speculative ones.
+- Never skip, disable or quarantine a test to get a green build. Never push an
+  empty commit to kick CI.
+- A failing test is never an infrastructure flake. Root-cause it.
+- Write a clear, descriptive commit message that says what changed and why.
