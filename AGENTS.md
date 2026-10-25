@@ -41,6 +41,32 @@ a fake tree under `/tmp` and point `steam_root` / `epic_root` / `gog_root` at it
 in `~/.config/IonLauncher/config.json`. Always delete that config afterwards:
 if it still points at the fake tree, later runs report nonsense.
 
+### Verifying a screenshot shows what you think
+
+`import -window root` always succeeds, even when the click that was meant to
+change the page never landed. Never trust a screenshot by looking at it: read
+the page title back with OCR and assert on it.
+
+```sh
+convert shot.png -crop 1300x200+180+50 +repage \
+  -colorspace Gray -resize 200% -normalize /tmp/h.png
+tesseract /tmp/h.png - --psm 6
+```
+
+Two further traps, both seen here:
+
+- ImageMagick writes a `tIME` chunk, so two captures of an *identical* screen
+  differ in bytes while decoding to identical pixels. `md5sum` on the file is
+  therefore useless for telling pages apart — hash the decoded pixels
+  (`convert f.png -depth 8 ppm:- | md5sum`) or, better, compare OCR text.
+- A single `xdotool click` after `mousemove` is often dropped before the app
+  has settled. Click twice with a short pause, then move the pointer off the
+  control so hover styling does not confuse OCR.
+
+Set the starting view deterministically through `"view": "Grid"` or `"List"`
+in the config instead of clicking the toolbar chips, which sit too close
+together to hit reliably.
+
 ## Architecture
 
 Data flows one way: `providers::scan_all` produces a `ScanReport`, which the
