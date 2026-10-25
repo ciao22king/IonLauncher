@@ -1,0 +1,59 @@
+name: Windows installer
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  installer:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust and the Windows target
+      run: |
+        rustup target add x86_64-pc-windows-gnu
+
+    - name: Install the cross toolchain and NSIS
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y mingw-w64 nsis
+
+    - name: Configure the mingw linker
+      run: |
+        mkdir -p ~/.cargo
+        cat >> ~/.cargo/config.toml <<'EOF'
+        [target.x86_64-pc-windows-gnu]
+        linker = "x86_64-w64-mingw32-gcc"
+        ar = "x86_64-w64-mingw32-ar"
+        EOF
+
+    - name: Build ionlauncher.exe
+      run: cargo build --release --target x86_64-pc-windows-gnu
+
+    - name: Build the installer
+      run: |
+        mkdir -p dist
+        cp target/x86_64-pc-windows-gnu/release/ionlauncher.exe dist/
+        cd installer && makensis -V2 ionlauncher.nsi
+
+    - name: Upload the installer
+      uses: actions/upload-artifact@v4
+      with:
+        name: IonLauncher-Setup
+        path: dist/IonLauncher-*-Setup.exe
+        if-no-files-found: error
+
+    - name: Attach the installer to the release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/IonLauncher-*-Setup.exe

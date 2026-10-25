@@ -16,6 +16,11 @@
 //! extracting all happen on a worker, and progress is reported back through
 //! an atomic counter.
 
+// Proton is a Linux-only feature, but the module is compiled everywhere so
+// that the shared config and UI code keeps one shape. On other platforms
+// most of it is unreachable, which is expected rather than a defect.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
+
 use crate::util;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};

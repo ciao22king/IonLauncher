@@ -46,6 +46,19 @@ smooth on older hardware.
 
 ## Install
 
+### Windows
+
+Download `IonLauncher-<version>-Setup.exe` from the
+[releases page](https://github.com/ciao22king/IonLauncher/releases) and run it.
+The wizard walks through the licence, the install folder and where to put the
+shortcuts; the desktop shortcut is ticked by default. Uninstall from Settings →
+Apps, or with the shortcut in the Start menu folder.
+
+The installer is a normal Windows program: no admin rights beyond writing to
+Program Files, and no runtime to install alongside it.
+
+### From source
+
 You need a Rust toolchain (1.82 or newer).
 
 ```sh
@@ -57,6 +70,25 @@ cargo build --release
 
 The release binary is around 5 MB and has no runtime dependencies beyond your
 graphics driver and the store clients you already have.
+
+### Building the Windows installer
+
+The `.exe` and the setup wizard cross-compile from Linux:
+
+```sh
+rustup target add x86_64-pc-windows-gnu
+sudo apt install mingw-w64 nsis
+
+cargo build --release --target x86_64-pc-windows-gnu
+mkdir -p dist && cp target/x86_64-pc-windows-gnu/release/ionlauncher.exe dist/
+cd installer && makensis ionlauncher.nsi
+```
+
+The result is `dist/IonLauncher-<version>-Setup.exe`. The same steps run in
+[`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml),
+which uploads the installer as a build artifact and attaches it to the release
+when you push a `v*` tag.
+
 
 ### Linux packages
 

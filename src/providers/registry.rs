@@ -7,8 +7,6 @@
 
 #![cfg(target_os = "windows")]
 
-use std::path::PathBuf;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Hive {
     LocalMachine,
@@ -16,7 +14,7 @@ pub enum Hive {
 }
 
 impl Hive {
-    fn to_winreg(self) -> winreg::enums::HKEY {
+    fn to_winreg(self) -> winreg::HKEY {
         match self {
             Hive::LocalMachine => winreg::enums::HKEY_LOCAL_MACHINE,
             Hive::CurrentUser => winreg::enums::HKEY_CURRENT_USER,
@@ -63,9 +61,4 @@ pub fn subkeys(hive: Hive, subkey: &str) -> Vec<String> {
         return Vec::new();
     };
     key.enum_keys().flatten().collect()
-}
-
-/// Convenience for the providers: does this path look like a real install?
-pub fn is_installed_dir(path: &str) -> bool {
-    !path.is_empty() && PathBuf::from(path).is_dir()
 }

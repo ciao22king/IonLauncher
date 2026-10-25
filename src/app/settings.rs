@@ -41,7 +41,8 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                     ui.add_space(14.0);
                     // Proton only exists on Linux, so the section is hidden
                     // entirely elsewhere rather than shown greyed out.
-                    if cfg!(target_os = "linux") {
+                    #[cfg(target_os = "linux")]
+                    {
                         proton_section(app, ui);
                         ui.add_space(14.0);
                     }

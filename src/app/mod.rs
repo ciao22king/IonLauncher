@@ -131,6 +131,10 @@ impl IonApp {
     }
 
     /// Starts listing downloadable Proton builds, if not already doing so.
+    ///
+    /// Only the Linux Proton section offers downloads, so this is unused
+    /// elsewhere and gated to keep the Windows build warning-free.
+    #[cfg(target_os = "linux")]
     pub fn fetch_proton_releases(&mut self) {
         if self.proton_fetching_releases {
             return;

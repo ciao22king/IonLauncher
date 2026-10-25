@@ -1,0 +1,31 @@
+// Windows resources embedded in ionlauncher.exe: the taskbar/Explorer icon
+// and the version metadata shown in the file's Properties dialog.
+#include <winver.h>
+
+1 ICON "ionlauncher.ico"
+
+1 VERSIONINFO
+FILEVERSION     0,1,0,0
+PRODUCTVERSION  0,1,0,0
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName",      "IonLauncher"
+      VALUE "FileDescription",  "IonLauncher"
+      VALUE "FileVersion",      "0.1.0"
+      VALUE "InternalName",     "ionlauncher"
+      VALUE "LegalCopyright",   "GPL-2.0-or-later"
+      VALUE "OriginalFilename", "ionlauncher.exe"
+      VALUE "ProductName",      "IonLauncher"
+      VALUE "ProductVersion",   "0.1.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 0x04B0
+  END
+END
