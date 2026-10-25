@@ -266,6 +266,9 @@ The user may not see the tool calls, so the last message has to stand alone.
 - The `.deb` `Depends` list must cover the libraries the binary `dlopen`s, not
   just the ones in `ldd`. `strings` on the binary is how you find them; on Linux
   that means the GL, X11 and Wayland libraries.
+- Install the `.deb` with `apt-get install ./file.deb` in CI, not `dpkg -i`. The
+  GitHub runner image is missing some of the X11 libraries the list declares,
+  and `dpkg` leaves the package unconfigured rather than resolving them.
 - macOS packaging needs macOS: `hdiutil`, `codesign` and `lipo` have no Linux
   equivalent. On Linux you can still test the script's layout logic by stubbing
   those three commands on `PATH`.
