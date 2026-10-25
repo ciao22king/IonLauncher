@@ -54,9 +54,14 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 ui.allocate_exact_size(Vec2::new(width, cover_height), egui::Sense::hover());
             match &game.art {
                 Some(texture) => {
-                    let size = texture.size_vec2();
-                    let aspect = if size.y > 0.0 { size.x / size.y } else { 0.75 };
-                    widgets::paint_fit(ui, rect, texture.id(), aspect);
+                    widgets::paint_cover(
+                        ui,
+                        rect,
+                        texture,
+                        RADIUS_CARD,
+                        Palette::SURFACE,
+                        widgets::Corners::ALL,
+                    );
                 }
                 None => {
                     ui.painter().rect_filled(

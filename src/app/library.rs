@@ -7,7 +7,7 @@
 use crate::app::IonApp;
 use crate::config::ViewMode;
 use crate::theme::{Palette, RADIUS_CARD};
-use crate::widgets::{self, CardAction};
+use crate::widgets::{self, elided_job, CardAction};
 use egui::{CornerRadius, Rect, RichText, ScrollArea, Sense, Stroke, StrokeKind, Vec2};
 
 /// Space between cards.
@@ -66,14 +66,25 @@ fn header(app: &mut IonApp, ui: &mut egui::Ui) {
         } else {
             let visible = app.visible_ids().len();
             let total = app.games.len();
-            let text = if visible == total {
-                format!("{total} games from all stores")
+            let text = if app.favorites_only {
+                count_label(visible, "favourite", "favourites")
+            } else if visible == total {
+                format!("{} from all stores", count_label(total, "game", "games"))
             } else {
                 format!("{visible} of {total}")
             };
             ui.label(RichText::new(text).size(12.0).color(Palette::TEXT_FAINT));
         }
     });
+}
+
+/// `1 game` / `3 games`, so counts never read as "1 games".
+pub fn count_label(n: usize, singular: &str, plural: &str) -> String {
+    if n == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{n} {plural}")
+    }
 }
 
 /// Shared by the library and the search page so both render identically.
@@ -193,12 +204,7 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
         );
         match &game.art {
             Some(texture) => {
-                painter.image(
-                    texture.id(),
-                    thumb,
-                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                widgets::paint_cover(ui, thumb, texture, 6, fill, widgets::Corners::ALL)
             }
             None => {
                 painter.rect_filled(thumb, CornerRadius::same(6), Palette::SURFACE_HOVER);
@@ -213,11 +219,17 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
         }
 
         let text_x = thumb.max.x + 12.0;
-        painter.text(
-            egui::pos2(text_x, rect.center().y - 9.0),
-            egui::Align2::LEFT_CENTER,
+        let text_width = (rect.max.x - 44.0 - text_x).max(20.0);
+        let title_galley = painter.layout_job(elided_job(
             &game.title,
             egui::FontId::proportional(14.5),
+            Palette::TEXT,
+            text_width,
+            1,
+        ));
+        painter.galley(
+            egui::pos2(text_x, rect.center().y - 9.0 - title_galley.size().y / 2.0),
+            title_galley,
             Palette::TEXT,
         );
 
@@ -237,11 +249,16 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
         if !game.install_dir.as_os_str().is_empty() && !game.install_dir.exists() {
             meta.push("install missing".into());
         }
-        painter.text(
-            egui::pos2(text_x, rect.center().y + 11.0),
-            egui::Align2::LEFT_CENTER,
-            meta.join("  ·  "),
+        let meta_galley = painter.layout_job(elided_job(
+            &meta.join("  ·  "),
             egui::FontId::proportional(11.5),
+            Palette::TEXT_MUTED,
+            text_width,
+            1,
+        ));
+        painter.galley(
+            egui::pos2(text_x, rect.center().y + 11.0 - meta_galley.size().y / 2.0),
+            meta_galley,
             Palette::TEXT_MUTED,
         );
 
@@ -384,4 +401,17 @@ fn no_results(app: &mut IonApp, ui: &mut egui::Ui) {
             app.view_cache = None;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_label;
+
+    #[test]
+    fn counts_use_singular_for_one() {
+        assert_eq!(count_label(1, "game", "games"), "1 game");
+        assert_eq!(count_label(0, "game", "games"), "0 games");
+        assert_eq!(count_label(7, "game", "games"), "7 games");
+        assert_eq!(count_label(1, "favourite", "favourites"), "1 favourite");
+    }
 }

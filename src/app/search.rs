@@ -20,7 +20,10 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let count = app.visible_ids().len();
             let text = if app.search.trim().is_empty() {
-                format!("{} games installed", app.games.len())
+                format!(
+                    "{} installed",
+                    library::count_label(app.games.len(), "game", "games")
+                )
             } else if count == 1 {
                 "1 match".to_string()
             } else {

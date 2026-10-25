@@ -9,6 +9,17 @@ smooth on older hardware.
 
 ![IonLauncher library view](docs/screenshot-library.png)
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Library grid](docs/screenshot-library.png) | ![Library list](docs/screenshot-list.png) |
+| Cover grid with the whole library mixed across stores | Compact list with playtime, size and last played |
+| ![Search](docs/screenshot-search.png) | ![Favourites](docs/screenshot-favourites.png) |
+| Search across all three stores at once | Only the games you starred |
+| ![Game details](docs/screenshot-details.png) | ![Settings](docs/screenshot-settings.png) |
+| Details, statistics and launch options | Store detection and Proton settings |
+
 ## What it does
 
 - **One library, three stores.** Steam, Epic Games and GOG games appear in a

@@ -9,8 +9,8 @@ use crate::model::{Game, LaunchTarget, Store};
 use crate::theme::{Palette, RADIUS_CARD, RADIUS_CHIP};
 use crate::util;
 use egui::{
-    Align2, Color32, CornerRadius, FontId, Rect, Response, RichText, Sense, Stroke, StrokeKind,
-    TextureId, Ui, Vec2,
+    Align2, Color32, CornerRadius, FontId, Mesh, Rect, Response, RichText, Sense, Shape, Stroke,
+    StrokeKind, Ui, Vec2,
 };
 
 /// What the user did to a game card this frame.
@@ -45,7 +45,9 @@ pub fn game_card(
         let painter = ui.painter();
         painter.rect_filled(rect, CornerRadius::same(RADIUS_CARD), fill);
 
-        // Cover art, clipped to the card's top area.
+        // Cover art, cropped to fill the top area. Cropping rather than
+        // stretching keeps the artwork's own proportions, which matters
+        // because the stores ship a mix of portrait and square covers.
         let art_height = (size.y * 0.72).max(0.0);
         let art_rect = Rect::from_min_size(rect.min, Vec2::new(size.x, art_height));
         let rounded_art = Rect::from_min_max(
@@ -53,19 +55,12 @@ pub fn game_card(
             egui::pos2(rect.max.x - 1.0, art_rect.max.y),
         );
         match &game.art {
-            Some(texture) => {
-                painter.image(
-                    texture.id(),
-                    rounded_art,
-                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-            }
+            Some(texture) => paint_cover(ui, rounded_art, texture, RADIUS_CARD, fill, Corners::TOP),
             None => paint_art_placeholder(ui, rounded_art, game),
         }
 
-        // A subtle gradient band behind the title keeps text legible over
-        // bright artwork without a full overlay.
+        // A solid band behind the title keeps text legible over bright
+        // artwork without darkening the cover itself.
         let text_top = art_rect.max.y;
         let text_rect = Rect::from_min_max(
             egui::pos2(rect.min.x, text_top),
@@ -130,6 +125,126 @@ pub fn game_card(
     (response, action)
 }
 
+/// Which corners of a cover get rounded.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Corners {
+    pub top: bool,
+    pub bottom: bool,
+}
+
+impl Corners {
+    /// Card covers: the title band below already rounds the bottom.
+    pub const TOP: Self = Self {
+        top: true,
+        bottom: false,
+    };
+    /// Free-standing covers: details sheet and list thumbnails.
+    pub const ALL: Self = Self {
+        top: true,
+        bottom: true,
+    };
+}
+
+/// Draws a texture into `rect` as a cover: scaled up to fill the whole rect
+/// and centre-cropped, so the image keeps its aspect ratio and never distorts.
+///
+/// `Painter::image` cannot round the corners of a texture, so the corners
+/// selected by `corners` are masked with `corner_fill`, the colour of the
+/// surface the cover is sitting on.
+pub fn paint_cover(
+    ui: &Ui,
+    rect: Rect,
+    texture: &egui::TextureHandle,
+    radius: u8,
+    corner_fill: Color32,
+    corners: Corners,
+) {
+    if rect.width() < 1.0 || rect.height() < 1.0 {
+        return;
+    }
+    let size = texture.size_vec2();
+    if size.x < 1.0 || size.y < 1.0 {
+        return;
+    }
+
+    // UV window that crops the texture to the target aspect ratio, centred.
+    // Without this the cover would be stretched to the card's proportions.
+    let target = rect.width() / rect.height();
+    let source = size.x / size.y;
+    let uv = if source > target {
+        let keep = target / source;
+        let inset = (1.0 - keep) * 0.5;
+        Rect::from_min_max(egui::pos2(inset, 0.0), egui::pos2(1.0 - inset, 1.0))
+    } else {
+        let keep = source / target;
+        let inset = (1.0 - keep) * 0.5;
+        Rect::from_min_max(egui::pos2(0.0, inset), egui::pos2(1.0, 1.0 - inset))
+    };
+
+    let mut mesh = Mesh::with_texture(texture.id());
+    mesh.add_rect_with_uv(rect, uv, Color32::WHITE);
+    ui.painter().add(Shape::mesh(mesh));
+
+    if radius > 0 {
+        paint_corner_notches(ui, rect, radius as f32, corner_fill, corners);
+    }
+}
+
+/// Fills the four square corner notches of `rect` so a rectangular image reads
+/// as having rounded corners.
+///
+/// Each notch is the region between the square corner and the quarter-circle
+/// of `radius`, drawn as a fan from the corner point to points on the arc.
+fn paint_corner_notches(ui: &Ui, rect: Rect, r: f32, fill: Color32, corners: Corners) {
+    let painter = ui.painter();
+    let notch = |apex: egui::Pos2, center: egui::Pos2, from: f32, to: f32| {
+        let steps = 6;
+        let mut mesh = Mesh::default();
+        mesh.colored_vertex(apex, fill);
+        for i in 0..=steps {
+            let t = from + (to - from) * (i as f32 / steps as f32);
+            let (s, c) = t.sin_cos();
+            mesh.colored_vertex(center + Vec2::new(c * r, s * r), fill);
+            if i > 0 {
+                mesh.add_triangle(0, i as u32, i as u32 + 1);
+            }
+        }
+        painter.add(Shape::mesh(mesh));
+    };
+
+    use std::f32::consts::{FRAC_PI_2, PI};
+    if corners.top {
+        // Top-left: arc centre inset by r, sweeping from the left edge upward.
+        notch(
+            rect.min,
+            egui::pos2(rect.min.x + r, rect.min.y + r),
+            PI,
+            PI + FRAC_PI_2,
+        );
+        // Top-right.
+        notch(
+            egui::pos2(rect.max.x, rect.min.y),
+            egui::pos2(rect.max.x - r, rect.min.y + r),
+            PI + FRAC_PI_2,
+            2.0 * PI,
+        );
+    }
+    if corners.bottom {
+        notch(
+            egui::pos2(rect.min.x, rect.max.y),
+            egui::pos2(rect.min.x + r, rect.max.y - r),
+            FRAC_PI_2,
+            PI,
+        );
+        notch(
+            rect.max,
+            egui::pos2(rect.max.x - r, rect.max.y - r),
+            0.0,
+            FRAC_PI_2,
+        );
+    }
+}
+
 /// Placeholder shown before artwork arrives: the store accent plus the
 /// title's initials, so the grid still reads well while loading.
 fn paint_art_placeholder(ui: &Ui, rect: Rect, game: &Game) {
@@ -188,13 +303,16 @@ fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: boo
     }
 
     let title_size = if compact { 12.5 } else { 13.5 };
-    let galley = painter.layout(
-        game.title.clone(),
+    // Two rows maximum, elided with "…" when the title is longer. Without the
+    // row limit a long title is simply clipped mid-glyph by the band.
+    let galley = painter.layout_job(elided_job(
+        &game.title,
         FontId::proportional(title_size),
         Palette::TEXT,
         inner.width(),
-    );
-    let title_height = galley.size().y.min(inner.height() * 0.6);
+        2,
+    ));
+    let title_height = galley.size().y.min(inner.height() * 0.72);
     painter.galley(inner.min, galley, Palette::TEXT);
 
     // Metadata line: store, then playtime or size when known.
@@ -218,14 +336,45 @@ fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: boo
         } else {
             Palette::TEXT_FAINT
         };
-        let galley = painter.layout(
-            meta.join("  ·  "),
+        let galley = painter.layout_job(elided_job(
+            &meta.join("  ·  "),
             FontId::proportional(11.0),
             color,
             meta_rect.width(),
-        );
+            1,
+        ));
         painter.galley(meta_rect.min, galley, color);
     }
+}
+
+/// Lays out `text` wrapped to `width` and elided after `max_rows`, so long
+/// strings end in "…" instead of being cut mid-word by the paint rect.
+pub fn elided_job(
+    text: &str,
+    font: FontId,
+    color: Color32,
+    width: f32,
+    max_rows: usize,
+) -> egui::text::LayoutJob {
+    let mut job = egui::text::LayoutJob {
+        wrap: egui::text::TextWrapping {
+            max_width: width,
+            max_rows,
+            break_anywhere: max_rows == 1,
+            overflow_character: Some('…'),
+        },
+        ..Default::default()
+    };
+    job.append(
+        text,
+        0.0,
+        egui::text::TextFormat {
+            font_id: font,
+            color,
+            ..Default::default()
+        },
+    );
+    job
 }
 
 /// A small dot in the store's brand colour, top-left of the card.
@@ -366,24 +515,6 @@ pub fn launch_game(game: &Game) -> Result<(), String> {
             util::spawn_exe(exe, args, workdir)
         }
     }
-}
-
-/// Draws a texture scaled to fit inside `rect`, preserving aspect ratio.
-pub fn paint_fit(ui: &Ui, rect: Rect, texture: TextureId, aspect: f32) {
-    let painter = ui.painter();
-    let target_aspect = rect.width() / rect.height().max(1.0);
-    let size = if target_aspect > aspect {
-        Vec2::new(rect.height() * aspect, rect.height())
-    } else {
-        Vec2::new(rect.width(), rect.width() / aspect.max(0.01))
-    };
-    let centered = Rect::from_center_size(rect.center(), size);
-    painter.image(
-        texture,
-        centered,
-        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-        Color32::WHITE,
-    );
 }
 
 #[cfg(test)]
