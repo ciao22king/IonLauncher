@@ -30,39 +30,56 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     let ids: Vec<String> = app.visible_ids().to_vec();
 
     match view {
-        ViewMode::Grid => grid(app, ui, &ids),
-        ViewMode::List => list(app, ui, &ids),
+        ViewMode::Grid => grid(app, ui, &ids, "library-grid"),
+        ViewMode::List => list(app, ui, &ids, "library-list"),
     }
 }
 
-/// Title plus the active search, so the user knows what they are looking at.
+/// Title plus the current filter, so the user knows what they are looking at.
 fn header(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         let title = if app.favorites_only {
             "Favourites"
         } else {
-            "Library"
+            "Installed games"
         };
         ui.label(RichText::new(title).size(22.0).strong().color(Palette::TEXT));
         ui.add_space(8.0);
+
+        // A search set on the Search page still filters here, so say so and
+        // give a way out without leaving the page.
         if !app.search.trim().is_empty() {
             ui.label(
                 RichText::new(format!("matching “{}”", app.search.trim()))
-                    .size(12.5)
+                    .size(12.0)
                     .color(Palette::TEXT_MUTED),
             );
+            if ui.small_button("✕").on_hover_text("Clear search").clicked() {
+                app.search.clear();
+                app.view_cache = None;
+            }
+        } else {
+            let visible = app.visible_ids().len();
+            let total = app.games.len();
+            let text = if visible == total {
+                format!("{total} games from all stores")
+            } else {
+                format!("{visible} of {total}")
+            };
+            ui.label(RichText::new(text).size(12.0).color(Palette::TEXT_FAINT));
         }
     });
 }
 
-fn grid(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String]) {
+/// Shared by the library and the search page so both render identically.
+pub fn grid(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
     let card_width = app.config.card_width.clamp(150.0, 340.0);
     // Portrait covers are 3:4, plus room for the title block.
     let card_height = card_width * 4.0 / 3.0 + 46.0;
     let card_size = Vec2::new(card_width, card_height);
 
     ScrollArea::vertical()
-        .id_salt("library-grid")
+        .id_salt(salt)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let available = ui.available_width();
@@ -117,9 +134,9 @@ fn draw_card(app: &mut IonApp, ui: &mut egui::Ui, id: &str, size: Vec2) {
     apply(app, id, action);
 }
 
-fn list(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String]) {
+pub fn list(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
     ScrollArea::vertical()
-        .id_salt("library-list")
+        .id_salt(salt)
         .auto_shrink([false, false])
         .show(ui, |ui| {
             for id in ids {

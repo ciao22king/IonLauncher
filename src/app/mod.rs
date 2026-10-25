@@ -10,13 +10,19 @@ use std::sync::mpsc::{channel, Receiver};
 
 pub mod details;
 pub mod library;
+pub mod search;
 pub mod settings;
+pub mod sidebar;
 pub mod toolbar;
 
-/// Top-level screens.
+/// Pages reachable from the left menu.
+///
+/// These are views of the same library, not separate per-store sections: the
+/// menu switches what you are doing, while the collection stays unified.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Library,
+    Search,
     Settings,
 }
 
@@ -293,6 +299,7 @@ impl eframe::App for IonApp {
         self.poll_artwork(&ctx);
         self.refresh_view();
         self.paint_toast(&ctx);
+        self.handle_shortcuts(&ctx);
 
         egui::Panel::top("topbar")
             .frame(crate::ui::topbar_frame())
@@ -306,24 +313,6 @@ impl eframe::App for IonApp {
                             .strong()
                             .color(Palette::TEXT),
                     );
-                    ui.add_space(14.0);
-
-                    let width = (ui.available_width() - 240.0).clamp(160.0, 460.0);
-                    let response = ui.add_sized(
-                        Vec2::new(width, 30.0),
-                        egui::TextEdit::singleline(&mut self.search)
-                            .hint_text("Search your games…")
-                            .desired_width(f32::INFINITY),
-                    );
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        let term = self.search.clone();
-                        self.config.remember_search(&term);
-                        self.config_dirty = true;
-                    }
-                    if !self.search.is_empty() && ui.button("✕").on_hover_text("Clear search").clicked()
-                    {
-                        self.search.clear();
-                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = if self.scanning {
@@ -340,20 +329,31 @@ impl eframe::App for IonApp {
                         {
                             self.rescan();
                         }
+
+                        if let Some(report) = &self.last_report {
+                            let text = if self.scanning {
+                                "scanning…".to_string()
+                            } else {
+                                format!("{} games · {} ms", self.games.len(), report.elapsed_ms)
+                            };
+                            ui.label(RichText::new(text).size(11.5).color(Palette::TEXT_FAINT));
+                        }
                     });
                 });
             });
 
-        // One library, one view: no per-store rooms. The toolbar under the
-        // search bar carries the few controls worth keeping in reach.
-        egui::Panel::top("toolbar")
-            .frame(crate::ui::toolbar_frame())
+        // The left menu is the primary navigation. It switches pages; it does
+        // not split the library by store.
+        egui::Panel::left("menu")
+            .exact_size(196.0)
+            .resizable(false)
+            .frame(crate::ui::sidebar_frame())
             .show(ui, |ui| {
-                toolbar::show(self, ui);
+                sidebar::show(self, ui);
             });
 
         // The details sheet takes precedence over the central content, so it
-        // is added to the remaining space before the library grid.
+        // is added to the remaining space before the page body.
         let details_open = self.details_for.is_some();
         if details_open {
             egui::Panel::right("details-panel")
@@ -368,7 +368,11 @@ impl eframe::App for IonApp {
         egui::CentralPanel::default()
             .frame(crate::ui::central_frame())
             .show(ui, |ui| match self.screen {
-                Screen::Library => library::show(self, ui),
+                Screen::Library => {
+                    toolbar::show(self, ui);
+                    library::show(self, ui);
+                }
+                Screen::Search => search::show(self, ui),
                 Screen::Settings => settings::show(self, ui),
             });
 
@@ -392,6 +396,16 @@ impl IonApp {
                 );
                 game.art = Some(texture);
             }
+        }
+    }
+
+    /// Ctrl+F jumps to the search page, the way a browser or file manager does.
+    fn handle_shortcuts(&mut self, ctx: &Context) {
+        let pressed = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)
+        });
+        if pressed {
+            self.screen = Screen::Search;
         }
     }
 

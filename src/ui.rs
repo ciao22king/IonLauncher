@@ -19,13 +19,6 @@ pub fn sidebar_frame() -> Frame {
         .inner_margin(Margin::symmetric(12, 14))
 }
 
-/// The single control strip below the search bar.
-pub fn toolbar_frame() -> Frame {
-    Frame::new()
-        .fill(Palette::SURFACE)
-        .inner_margin(Margin::symmetric(14, 8))
-}
-
 pub fn central_frame() -> Frame {
     Frame::new()
         .fill(Palette::BG)
