@@ -1,0 +1,71 @@
+name: macOS package
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    # Apple silicon runners build both slices natively and lipo them together,
+    # so the released app runs on Intel Macs too.
+    runs-on: macos-14
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Add both macOS targets
+      run: |
+        rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+    - name: Build for Apple silicon
+      run: cargo build --release --target aarch64-apple-darwin
+
+    - name: Build for Intel
+      run: cargo build --release --target x86_64-apple-darwin
+
+    - name: Build the app bundle and the disk image
+      env:
+        UNIVERSAL_SECOND_BINARY: target/x86_64-apple-darwin/release/ionlauncher
+      run: |
+        ./installer/macos/build-macos.sh \
+          target/aarch64-apple-darwin/release/ionlauncher
+
+    - name: Check the bundle is universal and complete
+      run: |
+        lipo -info dist/IonLauncher.app/Contents/MacOS/ionlauncher
+        plutil -lint dist/IonLauncher.app/Contents/Info.plist
+        codesign --verify --verbose=2 dist/IonLauncher.app || true
+        test -f dist/IonLauncher.app/Contents/Resources/ionlauncher.icns
+
+    - name: Check the app launches
+      run: |
+        dist/IonLauncher.app/Contents/MacOS/ionlauncher --version
+
+    - name: Mount the disk image and check its contents
+      run: |
+        hdiutil attach dist/IonLauncher-*.dmg -mountpoint /tmp/ionlauncher-dmg
+        ls -la /tmp/ionlauncher-dmg
+        test -d "/tmp/ionlauncher-dmg/IonLauncher.app"
+        test -L "/tmp/ionlauncher-dmg/Applications"
+        /tmp/ionlauncher-dmg/IonLauncher.app/Contents/MacOS/ionlauncher --version
+        hdiutil detach /tmp/ionlauncher-dmg
+
+    - name: Upload the disk image
+      uses: actions/upload-artifact@v4
+      with:
+        name: IonLauncher-macOS
+        path: dist/IonLauncher-*.dmg
+        if-no-files-found: error
+
+    - name: Attach the disk image to the release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/IonLauncher-*.dmg

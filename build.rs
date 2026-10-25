@@ -50,7 +50,9 @@ fn main() {
         }
         // A missing or failing windres should not break the build: the binary
         // is still perfectly usable, it just loses its icon.
-        Ok(status) => println!("cargo:warning={windres} failed with {status}; icon will be omitted"),
+        Ok(status) => {
+            println!("cargo:warning={windres} failed with {status}; icon will be omitted")
+        }
         Err(err) => println!("cargo:warning=could not run {windres}: {err}; icon will be omitted"),
     }
 }

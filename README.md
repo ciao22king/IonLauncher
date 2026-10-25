@@ -57,6 +57,43 @@ Apps, or with the shortcut in the Start menu folder.
 The installer is a normal Windows program: no admin rights beyond writing to
 Program Files, and no runtime to install alongside it.
 
+### Linux
+
+Two packages are published, both for x86_64.
+
+**Debian package.** Download `ionlauncher_<version>_amd64.deb` and install it:
+
+```sh
+sudo apt install ./ionlauncher_0.1.0_amd64.deb
+```
+
+This puts the binary in `/usr/bin`, adds IonLauncher to your applications menu
+with the right icon at every size, and pulls in the graphics libraries it needs.
+Remove it with `sudo apt remove ionlauncher`.
+
+**AppImage.** Download `ionlauncher-<version>-x86_64.AppImage`, make it
+executable and run it:
+
+```sh
+chmod +x ionlauncher-0.1.0-x86_64.AppImage
+./ionlauncher-0.1.0-x86_64.AppImage
+```
+
+The AppImage needs no installation and no root, which suits a machine you do
+not administer. If your system has no FUSE, run it with
+`APPIMAGE_EXTRACT_AND_RUN=1`.
+
+### macOS
+
+Download `IonLauncher-<version>.dmg`, open it and drag IonLauncher to
+Applications. The app is universal, so the same download runs on Apple silicon
+and Intel Macs, and it needs macOS 11 or newer.
+
+The build is signed ad-hoc rather than with a Developer ID, so the first launch
+after a download needs a right-click → Open, or
+`xattr -d com.apple.quarantine /Applications/IonLauncher.app`. macOS remembers
+the choice afterwards.
+
 ### From source
 
 You need a Rust toolchain (1.82 or newer).
@@ -89,20 +126,40 @@ The result is `dist/IonLauncher-<version>-Setup.exe`. The same steps run in
 which uploads the installer as a build artifact and attaches it to the release
 when you push a `v*` tag.
 
+### Building the Linux packages
 
-### Linux packages
-
-`eframe` needs the usual desktop development headers to build:
+Both package scripts take an already-built binary, so build first:
 
 ```sh
-# Debian / Ubuntu
-sudo apt install libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev \
-                 libxi-dev libxkbcommon-dev libwayland-dev
+cargo build --release
 
-# Fedora
-sudo dnf install mesa-libGL-devel libX11-devel libXcursor-devel libXrandr-devel \
-                 libXi-devel libxkbcommon-devel wayland-devel
+./installer/linux/build-deb.sh        # dist/ionlauncher_<version>_amd64.deb
+./installer/linux/build-appimage.sh   # dist/ionlauncher-<version>-x86_64.AppImage
 ```
+
+The `.deb` needs `dpkg-deb` (Debian, Ubuntu and their derivatives). The AppImage
+needs `file` and a network connection the first time, to fetch `appimagetool`.
+Both scripts run in
+[`.github/workflows/linux-packages.yml`](.github/workflows/linux-packages.yml),
+which also installs the package and launches the AppImage to prove they work.
+
+### Building the macOS app
+
+This step needs macOS, because `hdiutil`, `codesign` and `lipo` have no Linux
+equivalent:
+
+```sh
+cargo build --release --target aarch64-apple-darwin
+cargo build --release --target x86_64-apple-darwin
+
+UNIVERSAL_SECOND_BINARY=target/x86_64-apple-darwin/release/ionlauncher \
+  ./installer/macos/build-macos.sh target/aarch64-apple-darwin/release/ionlauncher
+```
+
+The result is `dist/IonLauncher.app` and `dist/IonLauncher-<version>.dmg`. The
+second binary is optional; leave it out for a single-architecture build.
+[`.github/workflows/macos-package.yml`](.github/workflows/macos-package.yml)
+builds both slices and lipos them into one universal app.
 
 ## Try it without installing any games
 
@@ -178,8 +235,22 @@ The interface is built for machines that are not fast:
 
 ## Development
 
+On Linux, `eframe` needs the usual desktop development headers to build:
+
 ```sh
-cargo test      # 81 unit tests
+# Debian / Ubuntu
+sudo apt install libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev \
+                 libxi-dev libxkbcommon-dev libwayland-dev
+
+# Fedora
+sudo dnf install mesa-libGL-devel libX11-devel libXcursor-devel libXrandr-devel \
+                 libXi-devel libxkbcommon-devel wayland-devel
+```
+
+Then:
+
+```sh
+cargo test      # 111 unit tests
 cargo build     # debug build
 cargo run -- --demo
 ```

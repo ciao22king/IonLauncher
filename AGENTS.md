@@ -244,6 +244,39 @@ The user may not see the tool calls, so the last message has to stand alone.
 - The CI workflow builds the installer on every push and attaches it to tagged
   releases. `dist/` is ignored; the installer is a build product.
 
+## Linux and macOS packaging
+
+- `assets/ionlauncher.svg` is the icon master. The `.ico` and `.icns` and the
+  `assets/linux/*.png` set all come from it, so change the master and regenerate
+  rather than editing a raster. The SVG was fitted to the original icon: a
+  rounded rect with radius 56 and an eight-point bolt, verified to within 46
+  pixels of the original silhouette.
+- `installer/linux/build-deb.sh` and `build-appimage.sh` take an already-built
+  binary; neither compiles anything. Both are run by
+  `.github/workflows/linux-packages.yml`.
+- `mktemp -d` returns a 0700 directory. The `.deb` staging root must be 0755 or
+  the package installs with a root directory the user cannot read.
+- The `.deb` control file needs its `DEBIAN/` directory to exist before the
+  heredoc runs. An `install -D` of a file elsewhere does not create it.
+- `dpkg-deb --build --root-owner-group` is what makes the archive root-owned
+  without needing root to build.
+- `appimagetool` refuses to run without `file` installed, and needs
+  `APPIMAGE_EXTRACT_AND_RUN=1` on a machine with no FUSE (which includes most
+  containers and CI images).
+- The `.deb` `Depends` list must cover the libraries the binary `dlopen`s, not
+  just the ones in `ldd`. `strings` on the binary is how you find them; on Linux
+  that means the GL, X11 and Wayland libraries.
+- macOS packaging needs macOS: `hdiutil`, `codesign` and `lipo` have no Linux
+  equivalent. On Linux you can still test the script's layout logic by stubbing
+  those three commands on `PATH`.
+- A universal macOS build is two `cargo build`s plus `lipo`; pass the second
+  slice with `UNIVERSAL_SECOND_BINARY`.
+- The macOS app is ad-hoc signed, not notarised. That is enough to run, but the
+  first launch after a download needs a right-click → Open.
+- `cargo check --target x86_64-apple-darwin` fails on Linux inside `ring`'s C
+  code, which needs an Apple SDK. The Rust code itself type-checks; shim `cc`
+  and `ar` on `PATH` to prove it.
+
 ## Style
 
 - Comment the why, never the what. Do not narrate the diff or restate the code.

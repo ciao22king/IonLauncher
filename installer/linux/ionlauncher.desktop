@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=IonLauncher
+GenericName=Game launcher
+Comment=One launcher for your Steam, Epic Games and GOG libraries
+Exec=ionlauncher
+Icon=ionlauncher
+Terminal=false
+Categories=Game;Emulator;
+Keywords=games;launcher;steam;epic;gog;library;
+StartupNotify=true
+StartupWMClass=ionlauncher
