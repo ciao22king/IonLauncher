@@ -66,7 +66,11 @@ impl Database {
         }
         let raw_page_size = be_u16(&data, 16).ok_or("truncated header")? as usize;
         // The value 1 is the documented stand-in for 65536.
-        let page_size = if raw_page_size == 1 { 65536 } else { raw_page_size };
+        let page_size = if raw_page_size == 1 {
+            65536
+        } else {
+            raw_page_size
+        };
         if page_size < 512 || !page_size.is_power_of_two() {
             return Err(format!("unsupported page size {page_size}"));
         }
@@ -260,7 +264,9 @@ impl Database {
             if guard > 100_000 || payload.len() >= payload_len {
                 break;
             }
-            let Some(opage) = self.page(number) else { break };
+            let Some(opage) = self.page(number) else {
+                break;
+            };
             next = be_u32(opage, 0);
             let take = (self.usable - 4).min(payload_len - payload.len());
             let end = (4 + take).min(opage.len());
@@ -302,22 +308,37 @@ impl Database {
         };
         Ok(match serial {
             0 => (Value::Null, 0),
-            1 => (Value::Int(i8::from_be_bytes(need(1)?.try_into().unwrap()) as i64), 1),
-            2 => (Value::Int(i16::from_be_bytes(need(2)?.try_into().unwrap()) as i64), 2),
+            1 => (
+                Value::Int(i8::from_be_bytes(need(1)?.try_into().unwrap()) as i64),
+                1,
+            ),
+            2 => (
+                Value::Int(i16::from_be_bytes(need(2)?.try_into().unwrap()) as i64),
+                2,
+            ),
             3 => {
                 let b: [u8; 3] = need(3)?.try_into().unwrap();
                 let n = i32::from_be_bytes([(b[0] as i8) as u8, b[1], b[2], 0]) >> 8;
                 (Value::Int(n as i64), 3)
             }
-            4 => (Value::Int(i32::from_be_bytes(need(4)?.try_into().unwrap()) as i64), 4),
+            4 => (
+                Value::Int(i32::from_be_bytes(need(4)?.try_into().unwrap()) as i64),
+                4,
+            ),
             5 => {
                 let b: [u8; 6] = need(6)?.try_into().unwrap();
                 let mut v = [if b[0] & 0x80 != 0 { 0xff } else { 0 }; 8];
                 v[2..].copy_from_slice(&b);
                 (Value::Int(i64::from_be_bytes(v)), 6)
             }
-            6 => (Value::Int(i64::from_be_bytes(need(8)?.try_into().unwrap())), 8),
-            7 => (Value::Real(f64::from_be_bytes(need(8)?.try_into().unwrap())), 8),
+            6 => (
+                Value::Int(i64::from_be_bytes(need(8)?.try_into().unwrap())),
+                8,
+            ),
+            7 => (
+                Value::Real(f64::from_be_bytes(need(8)?.try_into().unwrap())),
+                8,
+            ),
             8 => (Value::Int(0), 0),
             9 => (Value::Int(1), 0),
             10 | 11 => (Value::Null, 0),
@@ -540,7 +561,10 @@ mod tests {
 
     #[test]
     fn split_respects_nesting_and_quotes() {
-        assert_eq!(split_top_level("a, f(x,y), 'c,d'"), vec!["a", " f(x,y)", " 'c,d'"]);
+        assert_eq!(
+            split_top_level("a, f(x,y), 'c,d'"),
+            vec!["a", " f(x,y)", " 'c,d'"]
+        );
     }
 
     #[test]

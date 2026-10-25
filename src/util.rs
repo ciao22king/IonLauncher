@@ -101,7 +101,11 @@ pub fn parse_timestamp(raw: &str) -> Option<u64> {
         if n <= 0 {
             return None;
         }
-        return Some(if n > 10_000_000_000 { n as u64 / 1000 } else { n as u64 });
+        return Some(if n > 10_000_000_000 {
+            n as u64 / 1000
+        } else {
+            n as u64
+        });
     }
     // ISO-8601: 2024-05-01T12:30:00Z or with an offset.
     parse_iso8601(raw)
@@ -235,11 +239,27 @@ pub fn open_url(url: &str) -> Result<(), String> {
 /// Launches an executable detached from IonLauncher, so closing the launcher
 /// does not kill the game.
 pub fn spawn_exe(exe: &Path, args: &[String], workdir: Option<&Path>) -> Result<(), String> {
+    spawn_exe_with_env(exe, args, workdir, &[])
+}
+
+/// Like [`spawn_exe`], but with extra environment variables.
+///
+/// Proton is driven entirely through its environment, so this is how a
+/// compatibility launch is configured.
+pub fn spawn_exe_with_env(
+    exe: &Path,
+    args: &[String],
+    workdir: Option<&Path>,
+    env: &[(String, String)],
+) -> Result<(), String> {
     if !exe.exists() {
         return Err(format!("executable not found: {}", exe.display()));
     }
     let mut cmd = Command::new(exe);
     cmd.args(args);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
     if let Some(dir) = workdir {
         if dir.is_dir() {
             cmd.current_dir(dir);

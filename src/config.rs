@@ -77,6 +77,15 @@ pub struct Config {
     pub recent_searches: Vec<String>,
     /// Game ids the user starred, shown on the Favourites screen.
     pub favorites: Vec<String>,
+    /// Run Windows games through Proton instead of the store client.
+    ///
+    /// Only affects Linux, and only games whose target is a Windows
+    /// executable: a `steam://` launch is left to Steam, which has its own
+    /// per-title compatibility setting.
+    pub proton_enabled: bool,
+    /// Name of the Proton build to use, matched against the directory name.
+    /// `None` means "pick automatically".
+    pub proton_version: Option<String>,
 }
 
 impl Default for Config {
@@ -96,6 +105,8 @@ impl Default for Config {
             gog_root: None,
             recent_searches: Vec::new(),
             favorites: Vec::new(),
+            proton_enabled: false,
+            proton_version: None,
         }
     }
 }
@@ -174,7 +185,8 @@ impl Config {
         if term.len() < 2 {
             return;
         }
-        self.recent_searches.retain(|s| !s.eq_ignore_ascii_case(term));
+        self.recent_searches
+            .retain(|s| !s.eq_ignore_ascii_case(term));
         self.recent_searches.insert(0, term.to_string());
         self.recent_searches.truncate(6);
     }
@@ -263,10 +275,33 @@ mod tests {
         // Re-searching an existing term moves it to the front without duplicating.
         cfg.remember_search("game 5");
         assert_eq!(cfg.recent_searches[0], "game 5");
-        assert_eq!(cfg.recent_searches.iter().filter(|s| *s == "game 5").count(), 1);
+        assert_eq!(
+            cfg.recent_searches
+                .iter()
+                .filter(|s| *s == "game 5")
+                .count(),
+            1
+        );
         // Too-short terms are ignored.
         cfg.remember_search("a");
         assert_eq!(cfg.recent_searches[0], "game 5");
+    }
+
+    #[test]
+    fn proton_settings_roundtrip_and_default_off() {
+        // Proton must be opt-in: turning it on for someone who has no build
+        // installed would break their Windows games rather than help.
+        let cfg = Config::default();
+        assert!(!cfg.proton_enabled);
+        assert_eq!(cfg.proton_version, None);
+
+        let mut cfg = Config::default();
+        cfg.proton_enabled = true;
+        cfg.proton_version = Some("GE-Proton9-20".into());
+        let text = serde_json::to_string(&cfg).unwrap();
+        let back: Config = serde_json::from_str(&text).unwrap();
+        assert!(back.proton_enabled);
+        assert_eq!(back.proton_version.as_deref(), Some("GE-Proton9-20"));
     }
 
     #[test]

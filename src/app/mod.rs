@@ -2,7 +2,7 @@
 
 use crate::art::ArtLoader;
 use crate::config::{Config, SortMode};
-use crate::model::{Game, ScanReport};
+use crate::model::{Game, LaunchTarget, ScanReport};
 use crate::providers;
 use crate::theme::Palette;
 use egui::{Context, RichText, Vec2};
@@ -58,6 +58,16 @@ pub struct IonApp {
     pub view_cache: Option<ViewCache>,
     /// Set when the config needs writing to disk.
     pub config_dirty: bool,
+    /// Proton builds found on this machine, refreshed on demand.
+    pub proton_installed: Vec<crate::proton::InstalledProton>,
+    /// Downloadable community builds, fetched in the background.
+    pub proton_releases: Option<Vec<crate::proton::Release>>,
+    pub proton_releases_error: Option<String>,
+    pub proton_fetching_releases: bool,
+    /// In-flight download, if any, plus the tag being installed.
+    pub proton_download: Option<(String, std::sync::Arc<crate::proton::DownloadProgress>)>,
+    /// Receive channel for the background release listing.
+    pub proton_release_rx: Option<Receiver<Result<Vec<crate::proton::Release>, String>>>,
 }
 
 /// Cached result of filtering and sorting, so the grid does not re-sort
@@ -101,9 +111,87 @@ impl IonApp {
             details_for: None,
             view_cache: None,
             config_dirty: false,
+            // Filled on first use of the Proton settings section, so a machine
+            // without Steam never pays for the directory walk.
+            proton_installed: Vec::new(),
+            proton_releases: None,
+            proton_releases_error: None,
+            proton_fetching_releases: false,
+            proton_download: None,
+            proton_release_rx: None,
         };
         app.rescan();
+        app.refresh_proton();
         app
+    }
+
+    /// Re-reads the Proton builds installed on this machine.
+    pub fn refresh_proton(&mut self) {
+        self.proton_installed = crate::proton::installed();
+    }
+
+    /// Starts listing downloadable Proton builds, if not already doing so.
+    pub fn fetch_proton_releases(&mut self) {
+        if self.proton_fetching_releases {
+            return;
+        }
+        self.proton_fetching_releases = true;
+        self.proton_releases_error = None;
+        let (tx, rx) = channel();
+        self.proton_release_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::proton::fetch_releases());
+        });
+    }
+
+    /// Collects the release listing and any finished download.
+    pub fn poll_proton(&mut self) {
+        if let Some(rx) = &self.proton_release_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.proton_fetching_releases = false;
+                self.proton_release_rx = None;
+                match result {
+                    Ok(releases) => self.proton_releases = Some(releases),
+                    Err(err) => self.proton_releases_error = Some(err),
+                }
+            }
+        }
+
+        // A finished download needs its new build picked up and reported.
+        let finished = self
+            .proton_download
+            .as_ref()
+            .is_some_and(|(_, progress)| progress.is_done());
+        if finished {
+            let (tag, progress) = self.proton_download.take().expect("checked above");
+            if let Some(err) = progress.error() {
+                self.notify_error(&format!("Could not install {tag}: {err}"));
+            } else {
+                self.refresh_proton();
+                // Select what was just installed: that is why the user
+                // clicked download rather than browsing the list.
+                self.config.proton_version = Some(tag.clone());
+                self.config.proton_enabled = true;
+                self.config_dirty = true;
+                self.notify(&format!("{tag} installed"));
+            }
+        }
+    }
+
+    /// The Proton build launches should use, if any.
+    ///
+    /// A configured build that has since been removed falls back to the
+    /// first installed one rather than silently launching without Proton.
+    pub fn active_proton(&self) -> Option<&crate::proton::InstalledProton> {
+        if !self.config.proton_enabled {
+            return None;
+        }
+        if let Some(wanted) = &self.config.proton_version {
+            if let Some(build) = self.proton_installed.iter().find(|b| &b.name == wanted) {
+                return Some(build);
+            }
+        }
+        self.proton_installed.first()
     }
 
     /// Starts a library scan on a worker thread.
@@ -175,7 +263,17 @@ impl IonApp {
             self.notify(&format!("Demo mode: {title} is not installed"));
             return;
         }
-        match crate::widgets::launch_game(game) {
+
+        // On Linux a Windows executable normally needs Proton. Doing this
+        // before the plain launch path means the user's Proton choice applies
+        // without them having to think about which game is which.
+        let via_proton = self.proton_launch_plan(game);
+        let outcome = match via_proton {
+            Some(plan) => plan.run(),
+            None => crate::widgets::launch_game(game),
+        };
+
+        match outcome {
             Ok(()) => {
                 // Mark it as just played so recency sorting reflects reality
                 // without waiting for the store to update its own metadata.
@@ -188,6 +286,35 @@ impl IonApp {
             }
             Err(err) => self.notify_error(&format!("Could not launch {title}: {err}")),
         }
+    }
+
+    /// Decides whether a game should start through Proton, and prepares it.
+    ///
+    /// Returns `None` whenever Proton does not apply: the setting is off, we
+    /// are not on Linux, no build is installed, or the title launches through
+    /// a store protocol. That last case matters because Steam applies its own
+    /// per-game compatibility setting, and overriding it from here would
+    /// contradict what the user configured in Steam.
+    fn proton_launch_plan(&self, game: &Game) -> Option<crate::proton::ProtonLaunch> {
+        if !cfg!(target_os = "linux") {
+            return None;
+        }
+        let build = self.active_proton()?;
+        let LaunchTarget::Direct { exe, args } = &game.launch else {
+            return None;
+        };
+        // Only Windows binaries need the compatibility layer.
+        if !crate::proton::looks_like_windows_executable(exe) {
+            return None;
+        }
+        let data_dir = crate::proton::data_dir()?;
+        let prefix = crate::proton::prefix_for(&data_dir, &game.id);
+        Some(crate::proton::ProtonLaunch::new(
+            build.clone(),
+            prefix,
+            exe.clone(),
+            args.clone(),
+        ))
     }
 
     pub fn toggle_favorite(&mut self, game_id: &str) {
@@ -232,9 +359,8 @@ impl IonApp {
         match key.sort {
             SortMode::RecentlyPlayed => indices.sort_by_key(|i| self.games[*i].recency_key()),
             SortMode::Name => indices.sort_by_key(|i| self.games[*i].title.to_lowercase()),
-            SortMode::Playtime => {
-                indices.sort_by_key(|i| std::cmp::Reverse(self.games[*i].playtime_secs.unwrap_or(0)))
-            }
+            SortMode::Playtime => indices
+                .sort_by_key(|i| std::cmp::Reverse(self.games[*i].playtime_secs.unwrap_or(0))),
             SortMode::Size => {
                 indices.sort_by_key(|i| std::cmp::Reverse(self.games[*i].size_bytes.unwrap_or(0)))
             }
@@ -297,16 +423,23 @@ impl eframe::App for IonApp {
         let ctx = ui.ctx().clone();
         self.poll_scan();
         self.poll_artwork(&ctx);
+        self.poll_proton();
         self.refresh_view();
         self.paint_toast(&ctx);
         self.handle_shortcuts(&ctx);
+        self.keep_animating(&ctx);
 
         egui::Panel::top("topbar")
             .frame(crate::ui::topbar_frame())
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.add_space(4.0);
-                    ui.label(RichText::new("ION").size(19.0).strong().color(Palette::ACCENT));
+                    ui.label(
+                        RichText::new("ION")
+                            .size(19.0)
+                            .strong()
+                            .color(Palette::ACCENT),
+                    );
                     ui.label(
                         RichText::new("LAUNCHER")
                             .size(19.0)
@@ -381,6 +514,22 @@ impl eframe::App for IonApp {
 }
 
 impl IonApp {
+    /// Keeps the window repainting while background work is in flight.
+    ///
+    /// egui only redraws in response to input, so without this a download or
+    /// a scan would appear frozen until the user moved the mouse: results
+    /// arrive on a channel that nothing is polling.
+    fn keep_animating(&self, ctx: &Context) {
+        let busy = self.scanning
+            || self.proton_fetching_releases
+            || self.proton_download.is_some()
+            || self.toast.is_some()
+            || self.games.iter().any(|g| g.art_pending);
+        if busy {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        }
+    }
+
     /// Uploads finished artwork into the GPU and attaches it to its game.
     fn poll_artwork(&mut self, ctx: &Context) {
         for result in self.art.poll() {
@@ -401,9 +550,7 @@ impl IonApp {
 
     /// Ctrl+F jumps to the search page, the way a browser or file manager does.
     fn handle_shortcuts(&mut self, ctx: &Context) {
-        let pressed = ctx.input_mut(|i| {
-            i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)
-        });
+        let pressed = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::F));
         if pressed {
             self.screen = Screen::Search;
         }

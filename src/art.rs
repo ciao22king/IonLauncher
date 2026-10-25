@@ -7,10 +7,15 @@
 //! * decoded covers are cached on disk, so the second launch needs no network
 //! * covers are downscaled before upload, which keeps VRAM use small enough
 //!   for integrated GPUs and old cards
+//!
+//! A game carries an ordered list of [`ArtSource`]s. Local files are tried
+//! first because a store that already cached a cover gives us a better image
+//! without any network traffic; URL and API sources follow.
 
+use crate::model::ArtSource;
 use egui::ColorImage;
-use std::io::Read as _;
 use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
@@ -22,6 +27,9 @@ const MAX_EDGE: u32 = 512;
 
 /// Downloads are capped so one slow CDN cannot stall a worker forever.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(12);
+
+/// Largest image we will read, in bytes.
+const MAX_BYTES: u64 = 20 * 1024 * 1024;
 
 pub struct ArtResult {
     pub game_id: String,
@@ -72,8 +80,8 @@ impl ArtLoader {
     /// Queues artwork for `game_id` if it is not already being loaded.
     ///
     /// Returns immediately; results arrive through [`ArtLoader::poll`].
-    pub fn request(&self, game_id: &str, urls: &[String]) {
-        if urls.is_empty() {
+    pub fn request(&self, game_id: &str, sources: &[ArtSource]) {
+        if sources.is_empty() {
             return;
         }
         {
@@ -87,7 +95,7 @@ impl ArtLoader {
             inflight.insert(game_id.to_string(), true);
         }
 
-        let urls = urls.to_vec();
+        let sources = sources.to_vec();
         let tx = self.tx.clone();
         let inflight = self.inflight.clone();
         let cache_dir = self.cache_dir.clone();
@@ -97,7 +105,7 @@ impl ArtLoader {
         // One short-lived thread per request. Artwork is requested in small
         // batches as cards become visible, so this stays bounded in practice.
         std::thread::spawn(move || {
-            let image = load_art(&game_id, &urls, cache_dir.as_deref(), fetch_enabled);
+            let image = load_art(&game_id, &sources, cache_dir.as_deref(), fetch_enabled);
             if let Ok(mut guard) = inflight.lock() {
                 guard.remove(&game_id);
             }
@@ -167,10 +175,14 @@ fn cache_path(dir: &std::path::Path, game_id: &str) -> PathBuf {
     dir.join(format!("{safe}.png"))
 }
 
-/// Loads artwork, preferring the disk cache and falling back to the network.
+/// Loads artwork, preferring the disk cache and falling back to the sources.
+///
+/// `fetch_enabled` only gates the network-backed sources. A local file is
+/// still read when fetching is off: it costs nothing and is often the only
+/// cover a machine with a metered connection will ever see.
 fn load_art(
     game_id: &str,
-    urls: &[String],
+    sources: &[ArtSource],
     cache_dir: Option<&std::path::Path>,
     fetch_enabled: bool,
 ) -> Option<ColorImage> {
@@ -185,13 +197,10 @@ fn load_art(
         }
     }
 
-    if !fetch_enabled {
-        return None;
-    }
-
-    for url in urls {
-        let Some(bytes) = fetch(url) else { continue };
-        let Some(image) = decode(&bytes) else { continue };
+    for source in sources {
+        let Some(image) = load_source(source, fetch_enabled) else {
+            continue;
+        };
         if let Some(dir) = cache_dir {
             // Re-encode the downscaled image, which also normalises whatever
             // exotic format the CDN returned into something cheap to decode.
@@ -204,6 +213,212 @@ fn load_art(
     None
 }
 
+/// Resolves one source to a decoded image.
+fn load_source(source: &ArtSource, fetch_enabled: bool) -> Option<ColorImage> {
+    match source {
+        ArtSource::Local(path) => {
+            let bytes = std::fs::read(path).ok()?;
+            decode(&bytes)
+        }
+        ArtSource::Url(url) => {
+            if !fetch_enabled {
+                return None;
+            }
+            let bytes = fetch(url)?;
+            decode(&bytes)
+        }
+        ArtSource::GogProduct(product_id) => {
+            if !fetch_enabled {
+                return None;
+            }
+            // GOG's artwork paths are content hashes, so the API has to be
+            // asked which one belongs to this product.
+            for url in gog_art_urls(product_id) {
+                if let Some(image) = fetch(&url).and_then(|bytes| decode(&bytes)) {
+                    return Some(image);
+                }
+            }
+            None
+        }
+        ArtSource::EpicProduct(app_name) => {
+            if !fetch_enabled {
+                return None;
+            }
+            for url in epic_api_art_urls(app_name) {
+                if let Some(image) = fetch(&url).and_then(|bytes| decode(&bytes)) {
+                    return Some(image);
+                }
+            }
+            None
+        }
+    }
+}
+
+/// Asks GOG's public API for a product's artwork URLs.
+///
+/// The portrait box art is preferred, then the wide background as a fallback
+/// for products that have no box art. A response that cannot be parsed yields
+/// no URLs rather than an error, because artwork is always optional.
+pub fn gog_art_urls(product_id: &str) -> Vec<String> {
+    let numeric: String = product_id.chars().filter(|c| c.is_ascii_digit()).collect();
+    if numeric.is_empty() {
+        return Vec::new();
+    }
+    let url = format!("https://api.gog.com/v2/games/{numeric}");
+    let Some(body) = fetch(&url) else {
+        return Vec::new();
+    };
+    let Ok(text) = std::str::from_utf8(&body) else {
+        return Vec::new();
+    };
+    parse_gog_art_urls(text)
+}
+
+/// Asks Epic's storefront content API for a title's artwork URLs.
+///
+/// Epic's CDN paths embed opaque hashes, so unlike Steam they cannot be built
+/// from the app name. The content API is public and returns the real hero and
+/// portrait art. The app name has to be turned into a storefront slug, which
+/// is lowercase and hyphen-separated; several candidate forms are tried
+/// because Epic's slugs do not follow one rule.
+pub fn epic_api_art_urls(app_name: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    for slug in epic_slug_candidates(app_name) {
+        let api =
+            format!("https://store-content.ak.epicgames.com/api/en-US/content/products/{slug}");
+        let Some(body) = fetch(&api) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(&body) else {
+            continue;
+        };
+        urls.extend(parse_epic_art_urls(text));
+        if !urls.is_empty() {
+            break;
+        }
+    }
+    urls
+}
+
+/// Slug forms worth trying for an Epic app name.
+///
+/// `AlanWake2` becomes `alanwake2`, `alan-wake-2` and `alan-wake2`; Epic uses
+/// different conventions per title, so all plausible spellings are offered.
+pub fn epic_slug_candidates(app_name: &str) -> Vec<String> {
+    let lower: String = app_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_ascii_lowercase();
+    let mut out = vec![lower.clone()];
+
+    // Insert a hyphen before each internal capital letter, then also before
+    // trailing digits, covering both `alan-wake2` and `alan-wake-2`.
+    let mut spaced = String::new();
+    let mut prev_lower_or_digit = false;
+    for ch in app_name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if ch.is_ascii_uppercase() && prev_lower_or_digit {
+                spaced.push('-');
+            }
+            spaced.push(ch.to_ascii_lowercase());
+            prev_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    if !spaced.is_empty() && spaced != lower {
+        out.push(spaced.clone());
+    }
+    // `foo2` -> `foo-2`, for titles that separate the sequel number.
+    let with_digit_gap: String = {
+        let mut s = String::new();
+        let mut prev_digit = false;
+        for ch in spaced.chars() {
+            if ch.is_ascii_digit() && !prev_digit && !s.is_empty() && !s.ends_with('-') {
+                s.push('-');
+            }
+            prev_digit = ch.is_ascii_digit();
+            s.push(ch);
+        }
+        s
+    };
+    if !with_digit_gap.is_empty() && !out.contains(&with_digit_gap) {
+        out.push(with_digit_gap);
+    }
+    out.dedup();
+    out
+}
+
+/// Pulls the hero/portrait image links out of an Epic content API response.
+///
+/// Split from the request so the parsing can be tested without the network.
+pub fn parse_epic_art_urls(body: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let mut urls = Vec::new();
+    // The portrait is the cover the grid wants; the wide background is the
+    // fallback for titles that have no portrait art.
+    for key in ["portraitBackgroundImageUrl", "backgroundImageUrl"] {
+        let Some(pages) = value.get("pages").and_then(|p| p.as_array()) else {
+            continue;
+        };
+        for page in pages {
+            if let Some(href) = page
+                .get("data")
+                .and_then(|d| d.get("hero"))
+                .and_then(|h| h.get(key))
+                .and_then(|v| v.as_str())
+            {
+                if !urls.iter().any(|u| u == href) {
+                    urls.push(href.to_string());
+                }
+            }
+        }
+    }
+    urls
+}
+
+/// Pulls the image links out of a GOG v2 API response.
+///
+/// Split from the request so the parsing can be tested without the network.
+pub fn parse_gog_art_urls(body: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
+        return Vec::new();
+    };
+    let Some(links) = value.get("_links") else {
+        return Vec::new();
+    };
+
+    let mut urls = Vec::new();
+    // Box art is the portrait cover the grid wants; the wide background and
+    // the Galaxy background are progressively worse fallbacks.
+    for key in ["boxArtImage", "backgroundImage", "galaxyBackgroundImage"] {
+        if let Some(href) = links
+            .get(key)
+            .and_then(|v| v.get("href"))
+            .and_then(|v| v.as_str())
+        {
+            urls.push(href.to_string());
+        }
+    }
+    // The product image is templated; `product_630` is the store-page size.
+    if let Some(href) = links
+        .get("_embedded")
+        .and_then(|v| v.get("product"))
+        .and_then(|v| v.get("_links"))
+        .and_then(|v| v.get("image"))
+        .and_then(|v| v.get("href"))
+        .and_then(|v| v.as_str())
+    {
+        if href.contains("{formatter}") {
+            urls.push(href.replace("{formatter}", "product_630"));
+        } else {
+            urls.push(href.to_string());
+        }
+    }
+    urls
+}
+
 fn fetch(url: &str) -> Option<Vec<u8>> {
     let agent = ureq::AgentBuilder::new()
         .timeout(FETCH_TIMEOUT)
@@ -214,13 +429,13 @@ fn fetch(url: &str) -> Option<Vec<u8>> {
     let length = response
         .header("Content-Length")
         .and_then(|v| v.parse::<u64>().ok());
-    if length.is_some_and(|len| len > 20 * 1024 * 1024) {
+    if length.is_some_and(|len| len > MAX_BYTES) {
         return None;
     }
     let mut bytes = Vec::new();
     response
         .into_reader()
-        .take(20 * 1024 * 1024)
+        .take(MAX_BYTES)
         .read_to_end(&mut bytes)
         .ok()?;
     if bytes.is_empty() {
@@ -329,10 +544,135 @@ mod tests {
     }
 
     #[test]
-    fn loader_skips_requests_without_urls() {
+    fn loader_skips_requests_without_sources() {
         let loader = ArtLoader::new(true);
         loader.request("steam:1", &[]);
         assert!(loader.poll().is_empty());
+    }
+
+    #[test]
+    fn local_artwork_is_read_without_any_network() {
+        // A store that already cached the cover must not need the network,
+        // even when fetching is disabled entirely.
+        let dir = temp_dir("local-art");
+        let image_path = dir.join("cover.png");
+        let source = ColorImage::new([4, 4], vec![egui::Color32::from_rgb(10, 20, 30); 16]);
+        std::fs::write(&image_path, encode_png(&source).unwrap()).unwrap();
+
+        let image = load_source(&ArtSource::local(&image_path), false);
+        assert!(image.is_some(), "a local file needs no network");
+        assert_eq!(image.unwrap().size, [4, 4]);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_missing_local_file_falls_through_to_the_next_source() {
+        let dir = temp_dir("fallthrough");
+        let real = dir.join("real.png");
+        let source = ColorImage::new([2, 2], vec![egui::Color32::WHITE; 4]);
+        std::fs::write(&real, encode_png(&source).unwrap()).unwrap();
+
+        let sources = vec![
+            ArtSource::local(dir.join("absent.png")),
+            ArtSource::local(&real),
+        ];
+        let image = load_art("g", &sources, None, false);
+        assert!(image.is_some(), "the second source should have been used");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn network_sources_are_skipped_when_fetching_is_disabled() {
+        assert!(load_source(&ArtSource::url("https://example.invalid/a.jpg"), false).is_none());
+        assert!(load_source(&ArtSource::gog_product("1207658930"), false).is_none());
+        assert!(load_source(&ArtSource::epic_product("Fortnite"), false).is_none());
+    }
+
+    #[test]
+    fn epic_artwork_links_are_extracted_from_the_api_response() {
+        let body = r#"{
+            "pages": [
+                {"data": {"hero": {
+                    "portraitBackgroundImageUrl": "https://cdn2.unrealengine.com/portrait.jpg",
+                    "backgroundImageUrl": "https://cdn2.unrealengine.com/wide.jpg"
+                }}}
+            ]
+        }"#;
+        let urls = parse_epic_art_urls(body);
+        assert_eq!(urls.len(), 2);
+        // The portrait is the cover the grid wants, so it comes first.
+        assert!(urls[0].ends_with("portrait.jpg"));
+        assert!(urls[1].ends_with("wide.jpg"));
+    }
+
+    #[test]
+    fn epic_parsing_survives_responses_without_hero_art() {
+        assert!(parse_epic_art_urls("{}").is_empty());
+        assert!(parse_epic_art_urls("not json").is_empty());
+        assert!(parse_epic_art_urls(r#"{"pages":[]}"#).is_empty());
+        assert!(parse_epic_art_urls(r#"{"pages":[{"data":{}}]}"#).is_empty());
+    }
+
+    #[test]
+    fn epic_slugs_cover_the_naming_conventions() {
+        // Epic mixes camelCase and kebab-case slugs, so several forms are tried.
+        let fortnite = epic_slug_candidates("Fortnite");
+        assert!(fortnite.contains(&"fortnite".to_string()));
+
+        let rocket = epic_slug_candidates("RocketLeague");
+        assert!(rocket.contains(&"rocketleague".to_string()));
+        assert!(rocket.contains(&"rocket-league".to_string()));
+
+        let alan = epic_slug_candidates("AlanWake2");
+        assert!(alan.contains(&"alanwake2".to_string()));
+        assert!(alan.contains(&"alan-wake-2".to_string()));
+    }
+
+    #[test]
+    fn gog_artwork_links_are_extracted_from_the_api_response() {
+        let body = r#"{
+            "_links": {
+                "boxArtImage": {"href": "https://images.gog-statics.com/box.jpg"},
+                "backgroundImage": {"href": "https://images.gog-statics.com/bg.jpg"}
+            }
+        }"#;
+        let urls = parse_gog_art_urls(body);
+        assert_eq!(urls.len(), 2);
+        // Portrait box art is the cover the grid wants, so it comes first.
+        assert_eq!(urls[0], "https://images.gog-statics.com/box.jpg");
+        assert_eq!(urls[1], "https://images.gog-statics.com/bg.jpg");
+    }
+
+    #[test]
+    fn gog_product_image_template_is_filled_in() {
+        let body = r#"{
+            "_links": {
+                "_embedded": {
+                    "product": {
+                        "_links": {
+                            "image": {
+                                "href": "https://images.gog-statics.com/hash_{formatter}.png",
+                                "templated": true
+                            }
+                        }
+                    }
+                }
+            }
+        }"#;
+        let urls = parse_gog_art_urls(body);
+        assert_eq!(urls.len(), 1);
+        assert!(!urls[0].contains("{formatter}"), "template was not filled");
+        assert!(urls[0].ends_with("_product_630.png"));
+    }
+
+    #[test]
+    fn gog_responses_without_images_are_not_fatal() {
+        assert!(parse_gog_art_urls("{}").is_empty());
+        assert!(parse_gog_art_urls("not json").is_empty());
+        assert!(parse_gog_art_urls(r#"{"_links":{}}"#).is_empty());
+        // A product id with no digits can never resolve, so no request is made.
+        assert!(gog_art_urls("no-digits-here").is_empty());
     }
 
     #[test]
@@ -340,7 +680,10 @@ mod tests {
         let loader = ArtLoader::new(false);
         assert!(!loader.fetch_enabled());
         // With no cache and fetching off, the request resolves to no artwork.
-        loader.request("steam:2", &["https://example.invalid/a.jpg".into()]);
+        loader.request(
+            "steam:2",
+            &[ArtSource::url("https://example.invalid/a.jpg")],
+        );
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             let results = loader.poll();
@@ -351,6 +694,27 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "loader never replied");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    #[test]
+    fn the_disk_cache_short_circuits_every_source() {
+        // Once a cover is cached, a broken source list must not matter.
+        let dir = temp_dir("cache-shortcircuit");
+        let image = ColorImage::new([3, 3], vec![egui::Color32::from_rgb(1, 2, 3); 9]);
+        std::fs::write(cache_path(&dir, "steam:42"), encode_png(&image).unwrap()).unwrap();
+
+        let sources = vec![ArtSource::local(dir.join("nope.png"))];
+        let loaded = load_art("steam:42", &sources, Some(&dir), false);
+        assert!(loaded.is_some(), "the cached cover should have been used");
+        assert_eq!(loaded.unwrap().size, [3, 3]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ion-art-{tag}-{}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]

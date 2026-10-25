@@ -95,4 +95,3 @@ pub fn apply(ctx: &egui::Context) {
         };
     });
 }
-

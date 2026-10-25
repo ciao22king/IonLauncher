@@ -15,7 +15,7 @@
 //! All available sources are merged and deduplicated.
 
 use crate::json_util as js;
-use crate::model::{Game, LaunchTarget, Store};
+use crate::model::{ArtSource, Game, LaunchTarget, Store};
 use crate::sqlite;
 use crate::util;
 use serde_json::Value;
@@ -107,8 +107,7 @@ pub fn scan_galaxy_db(db_path: &Path) -> Vec<Game> {
             let install_path = text_of(&row, &["installPath", "install_path"])
                 .map(PathBuf::from)
                 .unwrap_or_default();
-            let title = lookup_title(&db, &product_id)
-                .unwrap_or_else(|| product_id.clone());
+            let title = lookup_title(&db, &product_id).unwrap_or_else(|| product_id.clone());
             let mut game = Game::new(
                 format!("gog:{product_id}"),
                 product_id.clone(),
@@ -117,7 +116,7 @@ pub fn scan_galaxy_db(db_path: &Path) -> Vec<Game> {
             );
             game.install_dir = install_path;
             game.launch = LaunchTarget::Url(launch_url(&product_id));
-            game.art_urls = gog_art_urls(&product_id);
+            game.art_sources = gog_art_sources(&product_id);
             games.push(game);
         }
     }
@@ -142,7 +141,7 @@ pub fn scan_galaxy_db(db_path: &Path) -> Vec<Game> {
                     game.install_dir = PathBuf::from(path);
                 }
                 game.launch = LaunchTarget::Url(launch_url(&product_id));
-                game.art_urls = gog_art_urls(&product_id);
+                game.art_sources = gog_art_sources(&product_id);
                 games.push(game);
             }
         }
@@ -188,21 +187,66 @@ fn text_of(row: &sqlite::Row, names: &[&str]) -> Option<String> {
     None
 }
 
-/// GOG's public image CDN. The `_product_card` image is the portrait cover.
-pub fn gog_art_urls(product_id: &str) -> Vec<String> {
+/// GOG artwork sources for a product id.
+///
+/// GOG's CDN paths are content hashes, so they cannot be built from the
+/// product id; the public API is asked instead. Local caches are tried first
+/// so an installed game shows a cover with no network access at all.
+pub fn gog_art_sources(product_id: &str) -> Vec<ArtSource> {
     let numeric: String = product_id.chars().filter(|c| c.is_ascii_digit()).collect();
     if numeric.is_empty() {
         return Vec::new();
     }
-    vec![
-        format!("https://images.gog.com/{numeric}_product_card.jpg"),
-        format!("https://images.gog.com/{numeric}_glx_vertical_cover.webp"),
-    ]
+
+    let mut sources = Vec::new();
+    // GOG Galaxy and Heroic both cache covers under per-game directories.
+    for dir in gog_cache_dirs(&numeric) {
+        for name in [
+            "boxArtImage.jpg",
+            "boxart.jpg",
+            "cover.jpg",
+            "backgroundImage.jpg",
+            "background.jpg",
+        ] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                sources.push(ArtSource::local(candidate));
+            }
+        }
+    }
+
+    // The API resolves the real, hashed CDN URL for the box art.
+    sources.push(ArtSource::gog_product(numeric));
+    sources
 }
 
-/// Public alias used by the demo library and the UI.
-pub fn art_urls_for(product_id: &str) -> Vec<String> {
-    gog_art_urls(product_id)
+/// Directories where GOG clients cache a product's artwork.
+fn gog_cache_dirs(product_id: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let Some(home) = dirs::home_dir() else {
+        return dirs;
+    };
+    // GOG Galaxy on Windows keeps a web cache keyed by product id.
+    if let Some(local) = dirs::data_local_dir() {
+        dirs.push(
+            local
+                .join("GOG.com")
+                .join("Galaxy")
+                .join("webcache")
+                .join(product_id),
+        );
+    }
+    // Heroic keeps per-game cover art next to its config.
+    for base in [
+        home.join(".config").join("heroic"),
+        home.join("Library")
+            .join("Application Support")
+            .join("heroic"),
+    ] {
+        dirs.push(base.join("gog_store").join("library").join(product_id));
+        dirs.push(base.join("images").join(product_id));
+    }
+    dirs
 }
 
 /// Reads Heroic/gogdl's `installed.json`.
@@ -252,7 +296,7 @@ fn heroic_gog_game(entry: &Value) -> Option<Game> {
         .or_else(|| js::get_u64(entry, "size"))
         .filter(|s| *s > 0);
     game.launch = LaunchTarget::Url(launch_url(&app_name));
-    game.art_urls = gog_art_urls(&app_name);
+    game.art_sources = gog_art_sources(&app_name);
     Some(game)
 }
 
@@ -276,23 +320,18 @@ pub fn scan_registry() -> Vec<Game> {
             else {
                 continue;
             };
-            let Some(install_dir) = crate::providers::registry::read_string_hive(root, &full, "path")
+            let Some(install_dir) =
+                crate::providers::registry::read_string_hive(root, &full, "path")
             else {
                 continue;
             };
-            let mut game = Game::new(
-                format!("gog:{subkey}"),
-                subkey.clone(),
-                Store::Gog,
-                name,
-            );
+            let mut game = Game::new(format!("gog:{subkey}"), subkey.clone(), Store::Gog, name);
             game.install_dir = PathBuf::from(&install_dir);
             // Prefer the registered executable; fall back to the protocol.
             match crate::providers::registry::read_string_hive(root, &full, "exe") {
                 Some(exe) => {
-                    let exe_path = PathBuf::from(install_dir.clone()).join(
-                        exe.replace('\\', std::path::MAIN_SEPARATOR_STR),
-                    );
+                    let exe_path = PathBuf::from(install_dir.clone())
+                        .join(exe.replace('\\', std::path::MAIN_SEPARATOR_STR));
                     if exe_path.exists() {
                         game.launch = LaunchTarget::Direct {
                             exe: exe_path,
@@ -304,7 +343,7 @@ pub fn scan_registry() -> Vec<Game> {
                 }
                 None => game.launch = LaunchTarget::Url(launch_url(&subkey)),
             }
-            game.art_urls = gog_art_urls(&subkey);
+            game.art_sources = gog_art_sources(&subkey);
             games.push(game);
         }
     }
@@ -335,8 +374,8 @@ pub fn scan(override_root: Option<&Path>) -> Vec<Game> {
                     if existing.size_bytes.is_none() {
                         existing.size_bytes = game.size_bytes;
                     }
-                    if existing.art_urls.is_empty() {
-                        existing.art_urls = game.art_urls;
+                    if existing.art_sources.is_empty() {
+                        existing.art_sources = game.art_sources;
                     }
                 }
                 None => {
@@ -351,7 +390,10 @@ pub fn scan(override_root: Option<&Path>) -> Vec<Game> {
 
     if let Some(dir) = galaxy_data_dir(override_root) {
         // Galaxy keeps the database at the root of its data dir.
-        for candidate in [dir.join("galaxy-2.0.db"), dir.join("storage").join("galaxy-2.0.db")] {
+        for candidate in [
+            dir.join("galaxy-2.0.db"),
+            dir.join("storage").join("galaxy-2.0.db"),
+        ] {
             if candidate.is_file() {
                 add(scan_galaxy_db(&candidate), &mut games);
                 break;
@@ -380,11 +422,16 @@ mod tests {
     }
 
     #[test]
-    fn art_urls_extract_the_numeric_id() {
-        let urls = gog_art_urls("1207658691");
-        assert!(urls[0].contains("1207658691_product_card"));
-        // Non-numeric ids cannot be looked up on the CDN.
-        assert!(gog_art_urls("gog_game_name").is_empty());
+    fn art_sources_use_the_api_for_a_numeric_id() {
+        let sources = gog_art_sources("1207658691");
+        // GOG's CDN paths are content hashes, so the API has to resolve them.
+        assert!(
+            matches!(&sources[0], ArtSource::GogProduct(id) if id == "1207658691"),
+            "expected an API lookup, got {:?}",
+            sources[0]
+        );
+        // Non-numeric ids have nothing to look up.
+        assert!(gog_art_sources("gog_game_name").is_empty());
     }
 
     #[test]

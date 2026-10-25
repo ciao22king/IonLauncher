@@ -9,7 +9,12 @@ use egui::{RichText, ScrollArea, Vec2};
 use std::path::PathBuf;
 
 pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.label(RichText::new("Settings").size(22.0).strong().color(Palette::TEXT));
+    ui.label(
+        RichText::new("Settings")
+            .size(22.0)
+            .strong()
+            .color(Palette::TEXT),
+    );
     ui.add_space(4.0);
     ui.label(
         RichText::new("IonLauncher reads each store's own files. Nothing is uploaded anywhere.")
@@ -34,6 +39,12 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                     ui.add_space(14.0);
                     library_section(app, ui);
                     ui.add_space(14.0);
+                    // Proton only exists on Linux, so the section is hidden
+                    // entirely elsewhere rather than shown greyed out.
+                    if cfg!(target_os = "linux") {
+                        proton_section(app, ui);
+                        ui.add_space(14.0);
+                    }
                     paths_section(app, ui);
                     ui.add_space(14.0);
                     about_section(app, ui);
@@ -77,11 +88,7 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
                     } else {
                         "disabled".to_string()
                     };
-                    ui.label(
-                        RichText::new(detail)
-                            .size(11.5)
-                            .color(Palette::TEXT_FAINT),
-                    );
+                    ui.label(RichText::new(detail).size(11.5).color(Palette::TEXT_FAINT));
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.checkbox(&mut enabled, "").changed() {
@@ -107,7 +114,10 @@ fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
 
         let mut show_missing = app.config.show_missing;
         if ui
-            .checkbox(&mut show_missing, "Show games whose install folder is missing")
+            .checkbox(
+                &mut show_missing,
+                "Show games whose install folder is missing",
+            )
             .changed()
         {
             app.config.show_missing = show_missing;
@@ -243,6 +253,278 @@ fn paths_section(app: &mut IonApp, ui: &mut egui::Ui) {
             app.rescan();
         }
     });
+}
+
+/// Proton: running Windows games on Linux.
+///
+/// Split into "what is installed" and "what can be downloaded", because the
+/// two answer different questions: which build do I use, and where do I get
+/// another one.
+#[cfg(target_os = "linux")]
+fn proton_section(app: &mut IonApp, ui: &mut egui::Ui) {
+    crate::ui::card_frame().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        widgets::section_heading(ui, "Proton (Linux)");
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "Proton runs Windows games on Linux. Pick a build here and Windows titles \
+                 launch through it, each with its own prefix.",
+            )
+            .size(11.5)
+            .color(Palette::TEXT_MUTED),
+        );
+        ui.add_space(10.0);
+
+        // Master switch. Without a build installed there is nothing to switch
+        // to, so the checkbox explains that instead of silently doing nothing.
+        let mut enabled = app.config.proton_enabled;
+        let has_builds = !app.proton_installed.is_empty();
+        ui.add_enabled_ui(has_builds, |ui| {
+            if ui
+                .checkbox(&mut enabled, "Use Proton for Windows games")
+                .changed()
+            {
+                app.config.proton_enabled = enabled;
+                app.config_dirty = true;
+            }
+        });
+        if !has_builds {
+            ui.label(
+                RichText::new("No Proton build found yet — download one below.")
+                    .size(11.0)
+                    .color(Palette::TEXT_FAINT),
+            );
+        }
+
+        ui.add_space(12.0);
+        installed_proton_list(app, ui);
+
+        ui.add_space(12.0);
+        proton_download_list(app, ui);
+    });
+}
+
+/// The builds already on this machine, as a selectable list.
+#[cfg(target_os = "linux")]
+fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(format!("Installed ({})", app.proton_installed.len()))
+                .size(12.5)
+                .color(Palette::TEXT_MUTED),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if widgets::secondary_button(ui, "Rescan").clicked() {
+                app.refresh_proton();
+            }
+        });
+    });
+    ui.add_space(6.0);
+
+    if app.proton_installed.is_empty() {
+        ui.label(
+            RichText::new(
+                "Nothing installed. Steam's own builds and community builds in \
+                 compatibilitytools.d are both detected.",
+            )
+            .size(11.0)
+            .color(Palette::TEXT_FAINT),
+        );
+        return;
+    }
+
+    // Collected up front so the list can be drawn while `app` is borrowed.
+    let builds = app.proton_installed.clone();
+    let selected = app.config.proton_version.clone();
+    let active = app
+        .active_proton()
+        .map(|b| b.name.clone())
+        .unwrap_or_default();
+
+    for build in &builds {
+        let is_selected = selected.as_deref() == Some(build.name.as_str());
+        let is_active = active == build.name;
+        let mut remove_request = false;
+
+        ui.horizontal(|ui| {
+            // A radio makes the "one at a time" rule obvious. The value is
+            // driven by the config rather than by egui's own state, so the
+            // selection stays correct after a build is removed.
+            if ui.radio(is_selected, "").clicked() && !is_selected {
+                app.config.proton_version = Some(build.name.clone());
+                app.config_dirty = true;
+            }
+
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(&build.name).size(13.0).color(Palette::TEXT));
+                    if is_active {
+                        ui.label(RichText::new("in use").size(10.5).color(Palette::OK));
+                    }
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "{} · {}",
+                        build.origin.label(),
+                        build.path.display()
+                    ))
+                    .size(10.5)
+                    .color(Palette::TEXT_FAINT),
+                );
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // Steam's own builds are not ours to delete.
+                if build.origin == crate::proton::ProtonOrigin::CompatibilityTool
+                    && widgets::secondary_button(ui, "Remove").clicked()
+                {
+                    remove_request = true;
+                }
+            });
+        });
+
+        if remove_request {
+            match crate::proton::remove(build) {
+                Ok(()) => {
+                    if is_selected {
+                        app.config.proton_version = None;
+                        app.config_dirty = true;
+                    }
+                    app.refresh_proton();
+                    app.notify(&format!("{} removed", build.name));
+                }
+                Err(err) => app.notify_error(&format!("{}: {err}", build.name)),
+            }
+        }
+
+        ui.add_space(6.0);
+    }
+}
+
+/// Downloadable community builds, with a per-row download button.
+#[cfg(target_os = "linux")]
+fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new("Download builds")
+                .size(12.5)
+                .color(Palette::TEXT_MUTED),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if widgets::secondary_button(ui, "Refresh list").clicked() {
+                app.proton_releases = None;
+                app.fetch_proton_releases();
+            }
+        });
+    });
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new("Community builds from GloriousEggroll/proton-ge-custom.")
+            .size(10.5)
+            .color(Palette::TEXT_FAINT),
+    );
+    ui.add_space(8.0);
+
+    // Progress of an in-flight install takes over the section: while a build
+    // is downloading, starting a second one would be confusing and wasteful.
+    if let Some((tag, progress)) = &app.proton_download {
+        ui.label(
+            RichText::new(format!("Installing {tag}…"))
+                .size(12.0)
+                .color(Palette::TEXT),
+        );
+        ui.add_space(4.0);
+        let fraction = progress.fraction();
+        let text = if progress.total.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+            "starting…".to_string()
+        } else {
+            format!("{:.0}%", fraction * 100.0)
+        };
+        ui.add(
+            egui::ProgressBar::new(fraction)
+                .desired_width(ui.available_width())
+                .text(text),
+        );
+        ui.add_space(6.0);
+        ui.label(
+            RichText::new(
+                "A build is a few hundred megabytes; the download runs in the background.",
+            )
+            .size(10.5)
+            .color(Palette::TEXT_FAINT),
+        );
+        return;
+    }
+
+    if app.proton_releases.is_none() && !app.proton_fetching_releases {
+        // First time the section is drawn, kick off the listing.
+        app.fetch_proton_releases();
+    }
+
+    if app.proton_fetching_releases {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(
+                RichText::new("Loading the list…")
+                    .size(11.5)
+                    .color(Palette::TEXT_MUTED),
+            );
+        });
+        return;
+    }
+
+    if let Some(err) = &app.proton_releases_error {
+        ui.label(
+            RichText::new(format!("Could not load the list: {err}"))
+                .size(11.0)
+                .color(Palette::DANGER),
+        );
+        return;
+    }
+
+    let Some(releases) = app.proton_releases.clone() else {
+        return;
+    };
+
+    let installed_names: Vec<String> = app
+        .proton_installed
+        .iter()
+        .map(|b| b.name.clone())
+        .collect();
+
+    for release in releases {
+        let already = installed_names.iter().any(|n| n == &release.tag);
+        let mut start = false;
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.label(RichText::new(&release.tag).size(12.5).color(Palette::TEXT));
+                let detail = if release.published.is_empty() {
+                    release.size_label()
+                } else {
+                    format!("{} · {}", release.published, release.size_label())
+                };
+                ui.label(RichText::new(detail).size(10.5).color(Palette::TEXT_FAINT));
+            });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if already {
+                    ui.label(RichText::new("installed").size(11.0).color(Palette::OK));
+                } else if widgets::secondary_button(ui, "Download").clicked() {
+                    start = true;
+                }
+            });
+        });
+
+        if start {
+            let progress = crate::proton::DownloadProgress::new();
+            app.proton_download = Some((release.tag.clone(), progress.clone()));
+            crate::proton::download_release(release, progress);
+        }
+
+        ui.add_space(6.0);
+    }
 }
 
 fn about_section(app: &mut IonApp, ui: &mut egui::Ui) {

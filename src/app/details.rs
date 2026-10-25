@@ -24,7 +24,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
         if let Some(g) = app.game_mut(&id) {
             g.art_pending = true;
         }
-        app.art.request(&id, &game.art_urls);
+        app.art.request(&id, &game.art_sources);
     }
 
     let mut close = false;
@@ -50,7 +50,8 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             // Cover.
             let width = ui.available_width();
             let cover_height = (width * 4.0 / 3.0).min(360.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(width, cover_height), egui::Sense::hover());
+            let (rect, _) =
+                ui.allocate_exact_size(Vec2::new(width, cover_height), egui::Sense::hover());
             match &game.art {
                 Some(texture) => {
                     let size = texture.size_vec2();
@@ -74,11 +75,17 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             }
 
             ui.add_space(14.0);
-            ui.label(RichText::new(&game.title).size(19.0).strong().color(Palette::TEXT));
+            ui.label(
+                RichText::new(&game.title)
+                    .size(19.0)
+                    .strong()
+                    .color(Palette::TEXT),
+            );
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 let (dot, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), egui::Sense::hover());
-                ui.painter().circle_filled(dot.center(), 4.0, game.store.accent());
+                ui.painter()
+                    .circle_filled(dot.center(), 4.0, game.store.accent());
                 ui.label(
                     RichText::new(game.store.name())
                         .size(12.5)

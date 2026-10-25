@@ -40,6 +40,12 @@ image = { version = "0.25", default-features = false, features = [
 
 dirs = "6"
 
+# Unpacking community Proton builds. The tarball is the only format those
+# releases ship, and it must be extracted by us because there is no installer
+# to run. `tar` alone cannot read the gzip wrapper, hence `flate2`.
+tar = "0.4"
+flate2 = "1"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 

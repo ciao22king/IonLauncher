@@ -5,7 +5,7 @@
 //! Demo mode fills the library with realistic entries across all three
 //! stores so the interface can be tried, screenshotted and tested.
 
-use crate::model::{Game, LaunchTarget, Store};
+use crate::model::{ArtSource, Game, LaunchTarget, Store};
 use crate::providers::{epic, gog, steam};
 
 struct Sample {
@@ -20,26 +20,166 @@ struct Sample {
 
 /// A spread of real, well-known titles per store, with plausible numbers.
 const SAMPLES: &[Sample] = &[
-    Sample { store: Store::Steam, native_id: "570", title: "Dota 2", size_bytes: 41_000_000_000, playtime_secs: 184_320, last_played_days: Some(0) },
-    Sample { store: Store::Steam, native_id: "440", title: "Team Fortress 2", size_bytes: 28_700_000_000, playtime_secs: 92_700, last_played_days: Some(3) },
-    Sample { store: Store::Steam, native_id: "1245620", title: "ELDEN RING", size_bytes: 60_200_000_000, playtime_secs: 43_200, last_played_days: Some(9) },
-    Sample { store: Store::Steam, native_id: "1091500", title: "Cyberpunk 2077", size_bytes: 70_100_000_000, playtime_secs: 27_000, last_played_days: Some(21) },
-    Sample { store: Store::Steam, native_id: "292030", title: "The Witcher 3: Wild Hunt", size_bytes: 51_400_000_000, playtime_secs: 61_200, last_played_days: Some(64) },
-    Sample { store: Store::Steam, native_id: "413150", title: "Stardew Valley", size_bytes: 1_200_000_000, playtime_secs: 18_900, last_played_days: Some(140) },
-    Sample { store: Store::Steam, native_id: "1145360", title: "Hades", size_bytes: 15_300_000_000, playtime_secs: 7_200, last_played_days: Some(210) },
-    Sample { store: Store::Steam, native_id: "620", title: "Portal 2", size_bytes: 13_000_000_000, playtime_secs: 2_100, last_played_days: Some(400) },
-    Sample { store: Store::Epic, native_id: "Fortnite", title: "Fortnite", size_bytes: 39_500_000_000, playtime_secs: 12_600, last_played_days: Some(1) },
-    Sample { store: Store::Epic, native_id: "Control", title: "Control Ultimate Edition", size_bytes: 42_800_000_000, playtime_secs: 9_000, last_played_days: Some(33) },
-    Sample { store: Store::Epic, native_id: "GTAV", title: "Grand Theft Auto V", size_bytes: 105_000_000_000, playtime_secs: 33_000, last_played_days: Some(77) },
-    Sample { store: Store::Epic, native_id: "RocketLeague", title: "Rocket League", size_bytes: 22_400_000_000, playtime_secs: 55_800, last_played_days: Some(5) },
-    Sample { store: Store::Epic, native_id: "AlanWake2", title: "Alan Wake 2", size_bytes: 86_000_000_000, playtime_secs: 5_400, last_played_days: Some(120) },
-    Sample { store: Store::Epic, native_id: "DeathStranding", title: "Death Stranding", size_bytes: 68_000_000_000, playtime_secs: 0, last_played_days: None },
-    Sample { store: Store::Gog, native_id: "1207658924", title: "The Witcher 2: Assassins of Kings", size_bytes: 23_100_000_000, playtime_secs: 15_600, last_played_days: Some(45) },
-    Sample { store: Store::Gog, native_id: "1207658930", title: "Baldur's Gate 3", size_bytes: 122_000_000_000, playtime_secs: 98_400, last_played_days: Some(2) },
-    Sample { store: Store::Gog, native_id: "1207658679", title: "Heroes of Might and Magic III", size_bytes: 900_000_000, playtime_secs: 6_300, last_played_days: Some(300) },
-    Sample { store: Store::Gog, native_id: "1423049311", title: "Disco Elysium", size_bytes: 8_400_000_000, playtime_secs: 11_100, last_played_days: Some(18) },
-    Sample { store: Store::Gog, native_id: "1207659020", title: "Planescape: Torment", size_bytes: 1_600_000_000, playtime_secs: 0, last_played_days: None },
-    Sample { store: Store::Gog, native_id: "1787841355", title: "Hollow Knight", size_bytes: 9_000_000_000, playtime_secs: 14_400, last_played_days: Some(88) },
+    Sample {
+        store: Store::Steam,
+        native_id: "570",
+        title: "Dota 2",
+        size_bytes: 41_000_000_000,
+        playtime_secs: 184_320,
+        last_played_days: Some(0),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "440",
+        title: "Team Fortress 2",
+        size_bytes: 28_700_000_000,
+        playtime_secs: 92_700,
+        last_played_days: Some(3),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "1245620",
+        title: "ELDEN RING",
+        size_bytes: 60_200_000_000,
+        playtime_secs: 43_200,
+        last_played_days: Some(9),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "1091500",
+        title: "Cyberpunk 2077",
+        size_bytes: 70_100_000_000,
+        playtime_secs: 27_000,
+        last_played_days: Some(21),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "292030",
+        title: "The Witcher 3: Wild Hunt",
+        size_bytes: 51_400_000_000,
+        playtime_secs: 61_200,
+        last_played_days: Some(64),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "413150",
+        title: "Stardew Valley",
+        size_bytes: 1_200_000_000,
+        playtime_secs: 18_900,
+        last_played_days: Some(140),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "1145360",
+        title: "Hades",
+        size_bytes: 15_300_000_000,
+        playtime_secs: 7_200,
+        last_played_days: Some(210),
+    },
+    Sample {
+        store: Store::Steam,
+        native_id: "620",
+        title: "Portal 2",
+        size_bytes: 13_000_000_000,
+        playtime_secs: 2_100,
+        last_played_days: Some(400),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "Fortnite",
+        title: "Fortnite",
+        size_bytes: 39_500_000_000,
+        playtime_secs: 12_600,
+        last_played_days: Some(1),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "Control",
+        title: "Control Ultimate Edition",
+        size_bytes: 42_800_000_000,
+        playtime_secs: 9_000,
+        last_played_days: Some(33),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "GrandTheftAutoV",
+        title: "Grand Theft Auto V",
+        size_bytes: 105_000_000_000,
+        playtime_secs: 33_000,
+        last_played_days: Some(77),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "RocketLeague",
+        title: "Rocket League",
+        size_bytes: 22_400_000_000,
+        playtime_secs: 55_800,
+        last_played_days: Some(5),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "AlanWake2",
+        title: "Alan Wake 2",
+        size_bytes: 86_000_000_000,
+        playtime_secs: 5_400,
+        last_played_days: Some(120),
+    },
+    Sample {
+        store: Store::Epic,
+        native_id: "DeathStranding",
+        title: "Death Stranding",
+        size_bytes: 68_000_000_000,
+        playtime_secs: 0,
+        last_played_days: None,
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1207658930",
+        title: "The Witcher 2: Assassins of Kings",
+        size_bytes: 23_100_000_000,
+        playtime_secs: 15_600,
+        last_played_days: Some(45),
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1456460669",
+        title: "Baldur's Gate 3",
+        size_bytes: 122_000_000_000,
+        playtime_secs: 98_400,
+        last_played_days: Some(2),
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1207658787",
+        title: "Heroes of Might and Magic III",
+        size_bytes: 900_000_000,
+        playtime_secs: 6_300,
+        last_played_days: Some(300),
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1423049311",
+        title: "Cyberpunk 2077",
+        size_bytes: 70_100_000_000,
+        playtime_secs: 11_100,
+        last_played_days: Some(18),
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1207658887",
+        title: "Planescape: Torment",
+        size_bytes: 1_600_000_000,
+        playtime_secs: 0,
+        last_played_days: None,
+    },
+    Sample {
+        store: Store::Gog,
+        native_id: "1495134320",
+        title: "The Witcher 3: Wild Hunt",
+        size_bytes: 51_400_000_000,
+        playtime_secs: 14_400,
+        last_played_days: Some(88),
+    },
 ];
 
 /// Builds the demo library.
@@ -70,18 +210,30 @@ pub fn library() -> Vec<Game> {
                 .join(sample.store.key())
                 .join(sample.title.replace([':', '/'], "_"));
             game.launch = match sample.store {
-                Store::Steam => LaunchTarget::Url(format!("steam://runsappid/{}", sample.native_id)),
-                Store::Epic => LaunchTarget::Url(epic::launch_url("demo", "demo", sample.native_id)),
+                Store::Steam => {
+                    LaunchTarget::Url(format!("steam://runsappid/{}", sample.native_id))
+                }
+                Store::Epic => {
+                    LaunchTarget::Url(epic::launch_url("demo", "demo", sample.native_id))
+                }
                 Store::Gog => LaunchTarget::Url(gog::launch_url(sample.native_id)),
             };
-            game.art_urls = match sample.store {
+            game.art_sources = match sample.store {
                 Store::Steam => sample
                     .native_id
                     .parse::<u32>()
-                    .map(steam::steam_art_urls)
+                    .map(|appid| {
+                        steam::steam_art_sources(appid, None)
+                            .into_iter()
+                            .map(|source| match source {
+                                ArtSource::Url(url) => ArtSource::url(url),
+                                other => other,
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default(),
-                Store::Epic => epic::epic_art_urls(sample.native_id),
-                Store::Gog => gog::art_urls_for(sample.native_id),
+                Store::Epic => vec![ArtSource::epic_product(sample.native_id)],
+                Store::Gog => vec![ArtSource::gog_product(sample.native_id)],
             };
             game
         })
@@ -141,7 +293,11 @@ mod tests {
     fn demo_games_are_launchable_and_fully_populated() {
         for game in library() {
             assert!(!game.title.is_empty());
-            assert!(!game.art_urls.is_empty(), "{} has no artwork", game.title);
+            assert!(
+                !game.art_sources.is_empty(),
+                "{} has no artwork",
+                game.title
+            );
             match &game.launch {
                 LaunchTarget::Url(url) => assert!(!url.is_empty()),
                 LaunchTarget::Direct { .. } => panic!("demo games should use a store URL"),

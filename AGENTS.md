@@ -58,8 +58,17 @@ app stores as `Vec<Game>`. The UI never touches the filesystem directly.
   These are plain functions taking `&mut IonApp` and `&mut Ui`; they are not
   widgets. `library::grid` and `library::list` are shared with the search page
   so both render results identically.
-- `art.rs` — downloads, decodes and downscales covers on a worker thread, then
-  caches them to disk. Only the downscaled image reaches the GPU.
+- `art.rs` — resolves a game's `ArtSource` list in order (disk cache, local
+  store files, then network) and caches the decoded, downscaled cover to disk.
+  Only the downscaled image reaches the GPU. Steam cover URLs are built from
+  the app id; GOG and Epic use their public APIs because their CDN paths are
+  content hashes that cannot be guessed. Epic app names are internal codenames,
+  so the human title is tried as a second slug.
+- `proton.rs` — lists and installs Proton (Windows-on-Linux) builds. Installed
+  builds are read from every `compatibilitytools.d` directory; community builds
+  come from the GloriousEggroll release listing. A download runs on a worker
+  thread and unpacks through a staging directory so a partial install is never
+  visible to Steam.
 
 ## egui 0.37 specifics
 
@@ -74,6 +83,9 @@ This version differs from most tutorials, so do not copy older examples:
 - `Context::style()`/`set_style()` are gone. Use `all_styles_mut`,
   `style_mut_of` or `set_visuals`.
 - `egui::Area::new` needs an `Id`; build it with `Id::unique("name")`.
+- egui only repaints on input. Any background work (a scan, an artwork fetch,
+  a Proton download) needs `Context::request_repaint_after` from the frame
+  loop, or results arrive on their channel but the window never redraws.
 
 ## Style
 

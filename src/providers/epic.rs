@@ -10,7 +10,7 @@
 //! they store equivalent metadata in a plain `installed.json`.
 
 use crate::json_util as js;
-use crate::model::{Game, LaunchTarget, Store};
+use crate::model::{ArtSource, Game, LaunchTarget, Store};
 use crate::util;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -48,9 +48,9 @@ pub fn manifests_dir(override_root: Option<&Path>) -> Option<PathBuf> {
 
     #[cfg(target_os = "macos")]
     {
-        candidates.push(
-            PathBuf::from("/Users/Shared/Epic Games/EpicGamesLauncher/Data/Manifests"),
-        );
+        candidates.push(PathBuf::from(
+            "/Users/Shared/Epic Games/EpicGamesLauncher/Data/Manifests",
+        ));
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -136,7 +136,9 @@ pub fn game_from_manifest(value: &Value) -> Option<Game> {
     if !namespace.is_empty() && !catalog_id.is_empty() {
         game.launch = LaunchTarget::Url(launch_url(&namespace, &catalog_id, &app_name));
     } else if let Some(exe) = js::get_str(value, "LaunchExecutable") {
-        let exe_path = game.install_dir.join(exe.replace('\\', std::path::MAIN_SEPARATOR_STR));
+        let exe_path = game
+            .install_dir
+            .join(exe.replace('\\', std::path::MAIN_SEPARATOR_STR));
         game.launch = LaunchTarget::Direct {
             exe: exe_path,
             args: epic_launch_args(value),
@@ -145,7 +147,7 @@ pub fn game_from_manifest(value: &Value) -> Option<Game> {
         return None;
     }
 
-    game.art_urls = epic_art_urls(&app_name);
+    game.art_sources = epic_art_sources(&app_name, &game.title);
     Some(game)
 }
 
@@ -163,13 +165,96 @@ fn epic_launch_args(value: &Value) -> Vec<String> {
     args
 }
 
-/// Epic's public CDN, keyed by the lowercase app name.
-pub fn epic_art_urls(app_name: &str) -> Vec<String> {
-    let key = app_name.to_ascii_lowercase();
-    vec![
-        format!("https://cdn2.unrealengine.com/{key}-portrait-600x800.jpg"),
-        format!("https://cdn2.unrealengine.com/{key}-wide-1920x1080.jpg"),
-    ]
+/// Epic artwork sources for an app name.
+///
+/// Epic's public CDN paths are keyed by a lowercased app name, but the real
+/// storefront URLs embed opaque hashes, so the guessed paths are a best
+/// effort. The launchers do cache the real covers locally, and those are
+/// tried first because they always work offline.
+pub fn epic_art_sources(app_name: &str, title: &str) -> Vec<ArtSource> {
+    let mut sources = Vec::new();
+
+    for dir in epic_cache_dirs(app_name) {
+        for name in [
+            "portrait.jpg",
+            "cover.jpg",
+            "DieselGameBoxTall.jpg",
+            "DieselGameBox.jpg",
+            "wide.jpg",
+        ] {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                sources.push(ArtSource::local(candidate));
+            }
+        }
+    }
+
+    // Epic's storefront content API resolves the real, hashed CDN URLs. The
+    // app name is an internal codename for many titles, so the human title is
+    // offered as a second lookup when the two differ.
+    sources.push(ArtSource::epic_product(app_name));
+    if !title.is_empty() && title != app_name {
+        sources.push(ArtSource::epic_product(title));
+    }
+
+    // Guessed CDN paths are kept last: they only work for a handful of
+    // older titles, but they cost nothing when the API already answered.
+    for key in [app_name.to_ascii_lowercase(), title.to_ascii_lowercase()] {
+        if key.is_empty() {
+            continue;
+        }
+        for name in [
+            format!("{key}-portrait-600x800.jpg"),
+            format!("{key}-wide-1920x1080.jpg"),
+        ] {
+            sources.push(ArtSource::url(format!(
+                "https://cdn2.unrealengine.com/{name}"
+            )));
+        }
+    }
+    sources
+}
+
+/// Directories where Epic clients cache a title's artwork.
+fn epic_cache_dirs(app_name: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    // Heroic stores per-game art under its config and data roots.
+    let mut bases: Vec<PathBuf> = Vec::new();
+    if let Some(home) = dirs::home_dir() {
+        bases.push(home.join(".config").join("heroic"));
+        bases.push(
+            home.join("Library")
+                .join("Application Support")
+                .join("heroic"),
+        );
+        bases.push(
+            home.join(".var")
+                .join("app")
+                .join("com.heroicgameslauncher.hgl")
+                .join("config")
+                .join("heroic"),
+        );
+    }
+    if let Some(data) = dirs::data_dir() {
+        bases.push(data.join("heroic"));
+    }
+    // The Epic Games Launcher's own web cache on Windows.
+    if let Some(local) = dirs::data_local_dir() {
+        bases.push(
+            local
+                .join("EpicGamesLauncher")
+                .join("Saved")
+                .join("webcache"),
+        );
+    }
+
+    for base in bases {
+        dirs.push(base.join("images").join(app_name));
+        dirs.push(base.join("images").join(app_name.to_ascii_lowercase()));
+        dirs.push(base.join("epic_store").join("library").join(app_name));
+        dirs.push(base.join("icons").join(app_name));
+    }
+    dirs
 }
 
 /// Reads all Epic manifests found on disk.
@@ -266,7 +351,7 @@ fn heroic_game(entry: &Value) -> Option<Game> {
             args: Vec::new(),
         };
     }
-    game.art_urls = epic_art_urls(&app_name);
+    game.art_sources = epic_art_sources(&app_name, &game.title);
     Some(game)
 }
 
@@ -428,8 +513,22 @@ mod tests {
     }
 
     #[test]
-    fn art_urls_use_the_lowercased_app_name() {
-        let urls = epic_art_urls("Fortnite");
-        assert!(urls[0].contains("fortnite-portrait"));
+    fn art_sources_try_the_api_then_guessed_cdn_paths() {
+        let sources = epic_art_sources("Fortnite", "Fortnite");
+        // The API resolves real hashed URLs, so it is tried before the
+        // guessed paths that only work for a few older titles.
+        assert!(
+            matches!(&sources[0], ArtSource::EpicProduct(name) if name == "Fortnite"),
+            "expected an API lookup first, got {:?}",
+            sources[0]
+        );
+        let urls: Vec<&String> = sources
+            .iter()
+            .filter_map(|s| match s {
+                ArtSource::Url(url) => Some(url),
+                _ => None,
+            })
+            .collect();
+        assert!(urls.iter().any(|u| u.contains("fortnite-portrait")));
     }
 }

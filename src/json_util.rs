@@ -127,9 +127,6 @@ mod tests {
         assert_eq!(percent_encode("a:b"), "a%3Ab");
         assert_eq!(percent_encode("a b/c"), "a%20b%2Fc");
         // The Epic triple must round-trip through the escape intact.
-        assert_eq!(
-            percent_encode("ns:cat:app"),
-            "ns%3Acat%3Aapp"
-        );
+        assert_eq!(percent_encode("ns:cat:app"), "ns%3Acat%3Aapp");
     }
 }

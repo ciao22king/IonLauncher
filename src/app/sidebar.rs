@@ -111,10 +111,15 @@ fn nav_item(
             egui::Color32::TRANSPARENT
         };
         if fill != egui::Color32::TRANSPARENT {
-            ui.painter().rect_filled(rect, CornerRadius::same(RADIUS_CONTROL), fill);
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(RADIUS_CONTROL), fill);
         }
 
-        let text_color = if selected { Palette::TEXT } else { Palette::TEXT_MUTED };
+        let text_color = if selected {
+            Palette::TEXT
+        } else {
+            Palette::TEXT_MUTED
+        };
         let mut child = ui.new_child(
             egui::UiBuilder::new()
                 .max_rect(rect.shrink2(Vec2::new(10.0, 0.0)))
@@ -135,5 +140,7 @@ fn nav_item(
         }
     }
 
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).clicked()
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }

@@ -274,7 +274,10 @@ pub fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
         let (fill, stroke_color) = if selected {
-            (accent.unwrap_or(Palette::ACCENT_DIM), accent.unwrap_or(Palette::ACCENT))
+            (
+                accent.unwrap_or(Palette::ACCENT_DIM),
+                accent.unwrap_or(Palette::ACCENT),
+            )
         } else if response.hovered() {
             (Palette::CARD_HOVER, Palette::BORDER)
         } else {
@@ -304,11 +307,7 @@ pub fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -
 /// A labelled stat, e.g. `Playtime / 42.5 h`. Skips itself when empty.
 pub fn stat(ui: &mut Ui, label: &str, value: &str) {
     ui.vertical(|ui| {
-        ui.label(
-            RichText::new(label)
-                .size(10.5)
-                .color(Palette::TEXT_FAINT),
-        );
+        ui.label(RichText::new(label).size(10.5).color(Palette::TEXT_FAINT));
         ui.label(RichText::new(value).size(13.0).color(Palette::TEXT));
     });
 }
@@ -393,12 +392,7 @@ mod tests {
     use crate::model::Store;
 
     fn game(title: &str) -> Game {
-        Game::new(
-            "steam:1".into(),
-            "1".into(),
-            Store::Steam,
-            title.into(),
-        )
+        Game::new("steam:1".into(), "1".into(), Store::Steam, title.into())
     }
 
     #[test]

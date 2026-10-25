@@ -11,7 +11,12 @@ use egui::{Key, RichText, Vec2};
 
 pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Search").size(22.0).strong().color(Palette::TEXT));
+        ui.label(
+            RichText::new("Search")
+                .size(22.0)
+                .strong()
+                .color(Palette::TEXT),
+        );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let count = app.visible_ids().len();
             let text = if app.search.trim().is_empty() {
@@ -97,7 +102,11 @@ fn recent_searches(app: &mut IonApp, ui: &mut egui::Ui) {
         return;
     }
 
-    ui.label(RichText::new("RECENT").size(10.5).color(Palette::TEXT_FAINT));
+    ui.label(
+        RichText::new("RECENT")
+            .size(10.5)
+            .color(Palette::TEXT_FAINT),
+    );
     ui.add_space(6.0);
 
     let terms = app.config.recent_searches.clone();

@@ -2,7 +2,10 @@
 
 // On Windows, suppress the console window that would otherwise appear
 // alongside the GUI. Release builds only, so debug output stays visible.
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 mod app;
 mod art;
@@ -10,6 +13,7 @@ mod config;
 mod demo;
 mod json_util;
 mod model;
+mod proton;
 mod providers;
 mod sqlite;
 mod theme;

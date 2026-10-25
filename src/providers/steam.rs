@@ -10,7 +10,7 @@
 //! Only installed titles are reported. `appmanifest_*.acf` exists exactly
 //! when a game is installed, which is the distinction users care about.
 
-use crate::model::{Game, LaunchTarget, Store};
+use crate::model::{ArtSource, Game, LaunchTarget, Store};
 use crate::util;
 use crate::vdf;
 use std::collections::HashMap;
@@ -33,9 +33,10 @@ pub fn locate(override_root: Option<&Path>) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         // The registry is authoritative and covers custom install drives.
-        if let Some(path) =
-            crate::providers::registry::read_string(r"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath")
-        {
+        if let Some(path) = crate::providers::registry::read_string(
+            r"HKEY_CURRENT_USER\Software\Valve\Steam",
+            "SteamPath",
+        ) {
             let p = PathBuf::from(path.replace('/', "\\"));
             if p.is_dir() {
                 return Some(p);
@@ -127,7 +128,9 @@ pub fn read_library_folders(root: &Path) -> Vec<PathBuf> {
         let Some(text) = util::read_text(&path) else {
             continue;
         };
-        let Ok(parsed) = vdf::parse(&text) else { continue };
+        let Ok(parsed) = vdf::parse(&text) else {
+            continue;
+        };
         let parsed = parsed
             .get("libraryfolders")
             .or_else(|| parsed.get("LibraryFolders"))
@@ -205,7 +208,9 @@ pub fn read_playtime(root: &Path) -> HashMap<u32, PlayStats> {
         let Some(text) = util::read_text_capped(&config, 32 * 1024 * 1024) else {
             continue;
         };
-        let Ok(parsed) = vdf::parse(&text) else { continue };
+        let Ok(parsed) = vdf::parse(&text) else {
+            continue;
+        };
         // `Software` -> `Valve` -> `Steam` -> `apps` -> `<appid>` -> `Playtime`
         let Some(apps) = parsed
             .get("UserLocalConfigStore")
@@ -217,7 +222,9 @@ pub fn read_playtime(root: &Path) -> HashMap<u32, PlayStats> {
             continue;
         };
         for (key, entry) in apps.as_map().into_iter().flatten() {
-            let Ok(appid) = key.parse::<u32>() else { continue };
+            let Ok(appid) = key.parse::<u32>() else {
+                continue;
+            };
             // Steam reports minutes here, despite the bare `Playtime` name.
             let minutes = entry
                 .get_u64("Playtime")
@@ -271,18 +278,57 @@ pub fn parse_app_manifest(path: &Path) -> Option<Game> {
             game.install_dir = steamapps.join("common").join(&install_dir);
         }
     }
-    game.art_urls = steam_art_urls(appid);
+    game.art_sources = steam_art_sources(appid, None);
     Some(game)
 }
 
-/// Steam's public capsule CDN. `library_600x900` is the portrait cover used
-/// on grid cards; `header` is the wide banner used on list rows.
-pub fn steam_art_urls(appid: u32) -> Vec<String> {
-    vec![
-        format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/library_600x900.jpg"),
-        format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"),
-        format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/capsule_616x353.jpg"),
-    ]
+/// Steam's public capsule CDN, plus the local library cache.
+///
+/// The cache is tried first: Steam writes `library_600x900_2x.jpg` there when
+/// a game is installed, which is both higher resolution than the public 1x
+/// copy and available with no network at all.
+///
+/// `library_600x900` is the portrait cover used on grid cards; `header` is the
+/// wide banner used on list rows.
+pub fn steam_art_sources(appid: u32, steam_root: Option<&Path>) -> Vec<ArtSource> {
+    let mut sources = Vec::new();
+
+    // Steam keeps one cache directory per library root. The artwork is stored
+    // under `<appcache>/librarycache/<appid>/`, and the 2x file is the one
+    // worth using when present.
+    if let Some(root) = steam_root {
+        for dir in [
+            root.join("appcache").join("librarycache"),
+            root.join("config").join("librarycache"),
+        ] {
+            let app_dir = dir.join(appid.to_string());
+            for name in [
+                "library_600x900_2x.jpg",
+                "library_600x900.jpg",
+                "header_2x.jpg",
+                "header.jpg",
+            ] {
+                let candidate = app_dir.join(name);
+                if candidate.is_file() {
+                    sources.push(ArtSource::local(candidate));
+                }
+            }
+        }
+    }
+
+    // The public CDN. The 2x portrait cover is preferred over the 1x one so
+    // the grid stays sharp on a HiDPI display.
+    for name in [
+        "library_600x900_2x.jpg",
+        "library_600x900.jpg",
+        "header.jpg",
+        "capsule_616x353.jpg",
+    ] {
+        sources.push(ArtSource::url(format!(
+            "https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/{name}"
+        )));
+    }
+    sources
 }
 
 /// Scans every library folder and returns all installed Steam games.
@@ -301,6 +347,9 @@ pub fn scan(install: &SteamInstall) -> Vec<Game> {
             }
             if let Some(mut game) = parse_app_manifest(&manifest) {
                 if let Some(appid) = game.app_id {
+                    // The root is known here, so the on-disk library cache can
+                    // be added ahead of the CDN URLs.
+                    game.art_sources = steam_art_sources(appid, Some(&install.root));
                     if let Some(stat) = stats.get(&appid) {
                         game.playtime_secs = Some(stat.playtime_secs).filter(|s| *s > 0);
                         game.last_played = Some(stat.last_played).filter(|s| *s > 0);
@@ -359,12 +408,18 @@ mod tests {
         assert_eq!(game.store, Store::Steam);
         assert_eq!(game.title, "Team Fortress 2");
         assert_eq!(game.size_bytes, Some(28_765_432_100));
-        assert_eq!(game.install_dir, steamapps.join("common").join("Team Fortress 2"));
+        assert_eq!(
+            game.install_dir,
+            steamapps.join("common").join("Team Fortress 2")
+        );
         match &game.launch {
             LaunchTarget::Url(u) => assert_eq!(u, "steam://runsappid/440"),
             other => panic!("unexpected launch target: {other:?}"),
         }
-        assert!(game.art_urls[0].contains("/440/"));
+        assert!(game
+            .art_sources
+            .iter()
+            .any(|s| matches!(s, ArtSource::Url(url) if url.contains("/440/"))));
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -562,9 +617,44 @@ mod tests {
 
     #[test]
     fn art_urls_are_ordered_cover_first() {
-        let urls = steam_art_urls(440);
-        assert!(urls[0].ends_with("library_600x900.jpg"));
-        assert!(urls[1].ends_with("header.jpg"));
+        let sources = steam_art_sources(440, None);
+        let urls: Vec<&String> = sources
+            .iter()
+            .filter_map(|s| match s {
+                ArtSource::Url(url) => Some(url),
+                _ => None,
+            })
+            .collect();
+        // The 2x portrait cover is preferred, then the 1x one, then the banner.
+        assert!(urls[0].ends_with("library_600x900_2x.jpg"));
+        assert!(urls[1].ends_with("library_600x900.jpg"));
+        assert!(urls.iter().any(|u| u.ends_with("header.jpg")));
         assert!(urls.len() >= 3);
+    }
+
+    #[test]
+    fn a_local_library_cache_is_preferred_over_the_cdn() {
+        // Steam's own cache is higher resolution and needs no network, so it
+        // must be tried before any URL.
+        let root = temp_dir("artcache");
+        let cache = root.join("appcache").join("librarycache").join("440");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("library_600x900_2x.jpg"), b"jpeg").unwrap();
+
+        let sources = steam_art_sources(440, Some(&root));
+        assert!(
+            matches!(&sources[0], ArtSource::Local(p) if p.ends_with("library_600x900_2x.jpg")),
+            "local cache should come first, got {:?}",
+            sources[0]
+        );
+        // The CDN entries must still be present as fallbacks.
+        assert!(sources.iter().any(|s| matches!(s, ArtSource::Url(_))));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn no_local_cache_means_only_cdn_sources() {
+        let sources = steam_art_sources(440, Some(Path::new("/definitely/not/here")));
+        assert!(sources.iter().all(|s| matches!(s, ArtSource::Url(_))));
     }
 }

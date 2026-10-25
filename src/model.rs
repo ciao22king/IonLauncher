@@ -49,7 +49,6 @@ impl Store {
             Store::Gog => "gog",
         }
     }
-
 }
 
 impl fmt::Display for Store {
@@ -69,6 +68,46 @@ pub enum LaunchTarget {
     Url(String),
     /// Absolute path to an executable, optionally with arguments.
     Direct { exe: PathBuf, args: Vec<String> },
+}
+
+/// Where a cover image can come from.
+///
+/// Sources are tried in order, and the first one that yields a decodable
+/// image wins. Keeping the ordering in one type means every provider can
+/// express "prefer what is already on disk, then the CDN" without the loader
+/// needing to know anything about stores.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArtSource {
+    /// A file the store already cached locally. Free: no network, and often
+    /// higher resolution than the public CDN copy.
+    Local(PathBuf),
+    /// A direct image URL.
+    Url(String),
+    /// A GOG product id. GOG's public API is consulted for the current
+    /// artwork URLs, because their CDN paths are content hashes that cannot
+    /// be guessed from the product id.
+    GogProduct(String),
+    /// An Epic app name. Epic's storefront content API is consulted for the
+    /// artwork URLs, which embed opaque hashes that cannot be guessed.
+    EpicProduct(String),
+}
+
+impl ArtSource {
+    pub fn local(path: impl Into<PathBuf>) -> Self {
+        ArtSource::Local(path.into())
+    }
+
+    pub fn url(url: impl Into<String>) -> Self {
+        ArtSource::Url(url.into())
+    }
+
+    pub fn gog_product(id: impl Into<String>) -> Self {
+        ArtSource::GogProduct(id.into())
+    }
+
+    pub fn epic_product(name: impl Into<String>) -> Self {
+        ArtSource::EpicProduct(name.into())
+    }
 }
 
 /// A single game, normalised across all stores.
@@ -91,8 +130,8 @@ pub struct Game {
     pub playtime_secs: Option<u64>,
     /// Epoch seconds of the last play session.
     pub last_played: Option<u64>,
-    /// Artwork URLs tried in order, most preferred first.
-    pub art_urls: Vec<String>,
+    /// Artwork sources tried in order, most preferred first.
+    pub art_sources: Vec<ArtSource>,
     /// Decoded artwork, filled in by the background loader.
     #[serde(skip)]
     pub art: Option<egui::TextureHandle>,
@@ -132,7 +171,7 @@ impl Game {
             size_bytes: None,
             playtime_secs: None,
             last_played: None,
-            art_urls: Vec::new(),
+            art_sources: Vec::new(),
             art: None,
             art_pending: false,
         }

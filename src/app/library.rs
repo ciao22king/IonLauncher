@@ -43,7 +43,12 @@ fn header(app: &mut IonApp, ui: &mut egui::Ui) {
         } else {
             "Installed games"
         };
-        ui.label(RichText::new(title).size(22.0).strong().color(Palette::TEXT));
+        ui.label(
+            RichText::new(title)
+                .size(22.0)
+                .strong()
+                .color(Palette::TEXT),
+        );
         ui.add_space(8.0);
 
         // A search set on the Search page still filters here, so say so and
@@ -109,9 +114,9 @@ pub fn grid(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
 fn draw_card(app: &mut IonApp, ui: &mut egui::Ui, id: &str, size: Vec2) {
     // Request artwork for anything about to be drawn. The loader dedupes,
     // so calling this every frame is cheap.
-    let (art_urls, art_pending, art_ready) = match app.game(id) {
+    let (art_sources, art_pending, art_ready) = match app.game(id) {
         Some(game) => (
-            game.art_urls.clone(),
+            game.art_sources.clone(),
             game.art_pending,
             game.art.is_some(),
         ),
@@ -121,7 +126,7 @@ fn draw_card(app: &mut IonApp, ui: &mut egui::Ui, id: &str, size: Vec2) {
         if let Some(game) = app.game_mut(id) {
             game.art_pending = true;
         }
-        app.art.request(id, &art_urls);
+        app.art.request(id, &art_sources);
     }
 
     let favorite = app.config.is_favorite(id);
@@ -147,15 +152,19 @@ pub fn list(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
 }
 
 fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
-    let (art_urls, art_pending, art_ready) = match app.game(id) {
-        Some(game) => (game.art_urls.clone(), game.art_pending, game.art.is_some()),
+    let (art_sources, art_pending, art_ready) = match app.game(id) {
+        Some(game) => (
+            game.art_sources.clone(),
+            game.art_pending,
+            game.art.is_some(),
+        ),
         None => return,
     };
     if !art_ready && !art_pending && app.art.fetch_enabled() {
         if let Some(game) = app.game_mut(id) {
             game.art_pending = true;
         }
-        app.art.request(id, &art_urls);
+        app.art.request(id, &art_sources);
     }
 
     let game = match app.game(id) {
@@ -192,11 +201,7 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
                 );
             }
             None => {
-                painter.rect_filled(
-                    thumb,
-                    CornerRadius::same(6),
-                    Palette::SURFACE_HOVER,
-                );
+                painter.rect_filled(thumb, CornerRadius::same(6), Palette::SURFACE_HOVER);
                 painter.text(
                     thumb.center(),
                     egui::Align2::CENTER_CENTER,
@@ -310,7 +315,11 @@ fn apply(app: &mut IonApp, id: &str, action: CardAction) {
 fn empty_state(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.add_space(60.0);
     ui.vertical_centered(|ui| {
-        ui.label(RichText::new("No games found").size(19.0).color(Palette::TEXT));
+        ui.label(
+            RichText::new("No games found")
+                .size(19.0)
+                .color(Palette::TEXT),
+        );
         ui.add_space(8.0);
         ui.label(
             RichText::new(
