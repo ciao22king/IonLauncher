@@ -18,18 +18,28 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     );
     ui.add_space(14.0);
 
+    // Cards read better in a fixed column than stretched across a wide
+    // window, so the form is centred and capped at a comfortable width.
     ScrollArea::vertical()
         .id_salt("settings-scroll")
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            stores_section(app, ui);
-            ui.add_space(14.0);
-            library_section(app, ui);
-            ui.add_space(14.0);
-            paths_section(app, ui);
-            ui.add_space(14.0);
-            about_section(app, ui);
-            ui.add_space(20.0);
+            let width = ui.available_width().min(760.0);
+            ui.allocate_ui_with_layout(
+                Vec2::new(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    stores_section(app, ui);
+                    ui.add_space(14.0);
+                    library_section(app, ui);
+                    ui.add_space(14.0);
+                    paths_section(app, ui);
+                    ui.add_space(14.0);
+                    about_section(app, ui);
+                    ui.add_space(20.0);
+                },
+            );
         });
 }
 
@@ -77,14 +87,8 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
                     if ui.checkbox(&mut enabled, "").changed() {
                         app.config.set_enabled(store, enabled);
                         app.config_dirty = true;
-                        // Keep the filter chips consistent with the toggles.
-                        if enabled {
-                            if !app.store_filter.contains(&store) {
-                                app.store_filter.push(store);
-                            }
-                        } else {
-                            app.store_filter.retain(|s| *s != store);
-                        }
+                        // A disabled store is dropped from the scan entirely,
+                        // so its games simply stop appearing in the library.
                         app.view_cache = None;
                         app.rescan();
                     }

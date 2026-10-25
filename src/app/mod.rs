@@ -2,7 +2,7 @@
 
 use crate::art::ArtLoader;
 use crate::config::{Config, SortMode};
-use crate::model::{Game, ScanReport, Store};
+use crate::model::{Game, ScanReport};
 use crate::providers;
 use crate::theme::Palette;
 use egui::{Context, RichText, Vec2};
@@ -11,13 +11,12 @@ use std::sync::mpsc::{channel, Receiver};
 pub mod details;
 pub mod library;
 pub mod settings;
-pub mod sidebar;
+pub mod toolbar;
 
 /// Top-level screens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
     Library,
-    Favorites,
     Settings,
 }
 
@@ -39,7 +38,8 @@ pub struct IonApp {
     pub screen: Screen,
     pub games: Vec<Game>,
     pub search: String,
-    pub store_filter: Vec<Store>,
+    /// Show only starred games. Replaces the old per-store "rooms".
+    pub favorites_only: bool,
     /// Set while a background scan is running.
     pub scanning: bool,
     pub scan_rx: Option<Receiver<ScanOutcome>>,
@@ -66,7 +66,6 @@ pub struct ViewCache {
 #[derive(PartialEq, Clone)]
 pub struct ViewKey {
     pub search: String,
-    pub stores: Vec<Store>,
     pub sort: SortMode,
     pub favorites_only: bool,
     pub show_missing: bool,
@@ -88,7 +87,7 @@ impl IonApp {
             screen: Screen::Library,
             games: Vec::new(),
             search: String::new(),
-            store_filter: Store::ALL.to_vec(),
+            favorites_only: false,
             scanning: false,
             scan_rx: None,
             last_report: None,
@@ -206,9 +205,8 @@ impl IonApp {
     pub fn refresh_view(&mut self) {
         let key = ViewKey {
             search: self.search.trim().to_lowercase(),
-            stores: self.store_filter.clone(),
             sort: self.config.sort,
-            favorites_only: self.screen == Screen::Favorites,
+            favorites_only: self.favorites_only,
             show_missing: self.config.show_missing,
             games_len: self.games.len(),
             favorites_len: self.config.favorites.len(),
@@ -244,9 +242,6 @@ impl IonApp {
     }
 
     fn matches(&self, game: &Game, key: &ViewKey) -> bool {
-        if !key.stores.contains(&game.store) {
-            return false;
-        }
         if key.favorites_only && !self.config.is_favorite(&game.id) {
             return false;
         }
@@ -349,12 +344,12 @@ impl eframe::App for IonApp {
                 });
             });
 
-        egui::Panel::left("sidebar")
-            .exact_size(208.0)
-            .resizable(false)
-            .frame(crate::ui::sidebar_frame())
+        // One library, one view: no per-store rooms. The toolbar under the
+        // search bar carries the few controls worth keeping in reach.
+        egui::Panel::top("toolbar")
+            .frame(crate::ui::toolbar_frame())
             .show(ui, |ui| {
-                sidebar::show(self, ui);
+                toolbar::show(self, ui);
             });
 
         // The details sheet takes precedence over the central content, so it
@@ -373,7 +368,7 @@ impl eframe::App for IonApp {
         egui::CentralPanel::default()
             .frame(crate::ui::central_frame())
             .show(ui, |ui| match self.screen {
-                Screen::Library | Screen::Favorites => library::show(self, ui),
+                Screen::Library => library::show(self, ui),
                 Screen::Settings => settings::show(self, ui),
             });
 

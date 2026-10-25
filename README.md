@@ -11,12 +11,13 @@ smooth on older hardware.
 
 ## What it does
 
-- **One library, three stores.** Steam, Epic Games and GOG games appear
-  together, each tagged with its store's colour.
+- **One library, three stores.** Steam, Epic Games and GOG games appear in a
+  single mixed list, each tagged with its store's colour — no separate
+  per-store tabs to click through.
 - **Launch anything.** Games start through their store client by default, so
   cloud saves, achievements and overlays keep working.
-- **Search and sort.** Filter by title, narrow down by store, and sort by name,
-  playtime, size or how recently you played.
+- **Search and sort.** Filter by title and sort by name, playtime, size or how
+  recently you played.
 - **Grid and list views.** A cover grid for browsing, a compact list when you
   want to see a lot at once.
 - **Favourites.** Star the games you actually play and find them in one click.

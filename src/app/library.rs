@@ -35,30 +35,19 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     }
 }
 
-/// Title plus the active filters, so the user knows what they are looking at.
+/// Title plus the active search, so the user knows what they are looking at.
 fn header(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
-        let title = match app.screen {
-            crate::app::Screen::Favorites => "Favourites",
-            _ => "Library",
+        let title = if app.favorites_only {
+            "Favourites"
+        } else {
+            "Library"
         };
         ui.label(RichText::new(title).size(22.0).strong().color(Palette::TEXT));
         ui.add_space(8.0);
         if !app.search.trim().is_empty() {
             ui.label(
                 RichText::new(format!("matching “{}”", app.search.trim()))
-                    .size(12.5)
-                    .color(Palette::TEXT_MUTED),
-            );
-        }
-        if app.store_filter.len() < crate::model::Store::ALL.len() {
-            let names: Vec<&str> = app
-                .store_filter
-                .iter()
-                .map(|s| s.short())
-                .collect();
-            ui.label(
-                RichText::new(format!("· {}", names.join(", ")))
                     .size(12.5)
                     .color(Palette::TEXT_MUTED),
             );
@@ -338,19 +327,34 @@ fn empty_state(app: &mut IonApp, ui: &mut egui::Ui) {
     });
 }
 
-/// Shown when filters or the search exclude everything.
+/// Shown when the search or the favourites filter excludes everything.
 fn no_results(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.add_space(60.0);
     ui.vertical_centered(|ui| {
-        ui.label(
-            RichText::new("Nothing matches those filters")
-                .size(17.0)
-                .color(Palette::TEXT),
-        );
+        let (title, hint) = if app.favorites_only {
+            (
+                "No favourites yet",
+                "Star a game from its details panel and it will show up here.",
+            )
+        } else {
+            (
+                "Nothing matches that search",
+                "Try a shorter word, or clear the search to see everything.",
+            )
+        };
+        ui.label(RichText::new(title).size(17.0).color(Palette::TEXT));
+        ui.add_space(6.0);
+        ui.label(RichText::new(hint).size(12.5).color(Palette::TEXT_MUTED));
         ui.add_space(10.0);
-        if widgets::secondary_button(ui, "Clear filters").clicked() {
+
+        let label = if app.favorites_only {
+            "Show all games"
+        } else {
+            "Clear search"
+        };
+        if widgets::secondary_button(ui, label).clicked() {
             app.search.clear();
-            app.store_filter = crate::model::Store::ALL.to_vec();
+            app.favorites_only = false;
             app.view_cache = None;
         }
     });

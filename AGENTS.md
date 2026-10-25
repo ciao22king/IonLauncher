@@ -53,8 +53,9 @@ app stores as `Vec<Game>`. The UI never touches the filesystem directly.
   whether a title starts via a store URL or a direct executable.
 - `app/mod.rs` — `IonApp` holds state and owns the view cache. Filtering and
   sorting are cached and only recomputed when `ViewKey` changes.
-- `app/library.rs`, `details.rs`, `settings.rs`, `sidebar.rs` — screens. These
-  are plain functions taking `&mut IonApp` and `&mut Ui`; they are not widgets.
+- `app/library.rs`, `details.rs`, `settings.rs`, `toolbar.rs` — screens and the
+  control strip. These are plain functions taking `&mut IonApp` and `&mut Ui`;
+  they are not widgets.
 - `art.rs` — downloads, decodes and downscales covers on a worker thread, then
   caches them to disk. Only the downscaled image reaches the GPU.
 
