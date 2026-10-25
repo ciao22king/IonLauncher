@@ -43,7 +43,9 @@ jobs:
 
     - name: Install the package and check what landed
       run: |
-        sudo dpkg -i dist/ionlauncher_*.deb
+        # apt, not dpkg: the runner does not carry every X11 library the app
+        # links against, and apt resolves the Depends list from the archive.
+        sudo apt-get install -y ./dist/ionlauncher_*.deb
         test -x /usr/bin/ionlauncher
         test -f /usr/share/applications/ionlauncher.desktop
         test -f /usr/share/icons/hicolor/256x256/apps/ionlauncher.png
