@@ -135,7 +135,8 @@ pub fn game_from_manifest(value: &Value) -> Option<Game> {
     // otherwise fall back to running the executable directly.
     if !namespace.is_empty() && !catalog_id.is_empty() {
         game.launch = LaunchTarget::Url(launch_url(&namespace, &catalog_id, &app_name));
-    } else if let Some(exe) = js::get_str(value, "LaunchExecutable") {
+    } else {
+        let exe = js::get_str(value, "LaunchExecutable")?;
         let exe_path = game
             .install_dir
             .join(exe.replace('\\', std::path::MAIN_SEPARATOR_STR));
@@ -143,8 +144,6 @@ pub fn game_from_manifest(value: &Value) -> Option<Game> {
             exe: exe_path,
             args: epic_launch_args(value),
         };
-    } else {
-        return None;
     }
 
     game.art_sources = epic_art_sources(&app_name, &game.title);

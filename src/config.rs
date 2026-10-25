@@ -233,10 +233,12 @@ mod tests {
 
     #[test]
     fn config_serialises_through_json() {
-        let mut cfg = Config::default();
-        cfg.sort = SortMode::Playtime;
-        cfg.view = ViewMode::List;
-        cfg.card_width = 300.0;
+        let cfg = Config {
+            sort: SortMode::Playtime,
+            view: ViewMode::List,
+            card_width: 300.0,
+            ..Config::default()
+        };
         let text = serde_json::to_string(&cfg).unwrap();
         let back: Config = serde_json::from_str(&text).unwrap();
         assert_eq!(back.sort, SortMode::Playtime);
@@ -248,8 +250,10 @@ mod tests {
     fn demo_mode_is_never_persisted() {
         // `--demo` shows a sample library for one session; writing that into
         // the saved config would hide the user's real games on next launch.
-        let mut cfg = Config::default();
-        cfg.demo_mode = true;
+        let cfg = Config {
+            demo_mode: true,
+            ..Config::default()
+        };
         let text = serde_json::to_string(&cfg).unwrap();
         assert!(!text.contains("demo_mode"));
         let back: Config = serde_json::from_str(&text).unwrap();
@@ -295,9 +299,11 @@ mod tests {
         assert!(!cfg.proton_enabled);
         assert_eq!(cfg.proton_version, None);
 
-        let mut cfg = Config::default();
-        cfg.proton_enabled = true;
-        cfg.proton_version = Some("GE-Proton9-20".into());
+        let cfg = Config {
+            proton_enabled: true,
+            proton_version: Some("GE-Proton9-20".into()),
+            ..Config::default()
+        };
         let text = serde_json::to_string(&cfg).unwrap();
         let back: Config = serde_json::from_str(&text).unwrap();
         assert!(back.proton_enabled);
