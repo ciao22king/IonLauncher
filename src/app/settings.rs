@@ -36,6 +36,8 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 |ui| {
                     ui.set_width(width);
                     stores_section(app, ui);
+                    ui.add_space(12.0);
+                    accounts_section(app, ui);
                     ui.add_space(14.0);
                     library_section(app, ui);
                     ui.add_space(14.0);
@@ -106,6 +108,83 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
             });
             ui.add_space(6.0);
         }
+    });
+}
+
+/// Storefront access: buy a title, or install it without the store client.
+///
+/// IonLauncher only reads what is already installed, so this section covers
+/// the two things a launcher cannot do by reading disk: reaching a store page
+/// and downloading a title when the official client is not wanted.
+fn accounts_section(app: &mut IonApp, ui: &mut egui::Ui) {
+    crate::ui::card_frame().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        widgets::section_heading(ui, "Stores & accounts");
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "Open a store page to buy or browse. Installing without the store client \
+                 uses a community downloader, which signs in once and keeps the session.",
+            )
+            .size(11.5)
+            .color(Palette::TEXT_FAINT),
+        );
+        ui.add_space(10.0);
+
+        for store in Store::ALL {
+            let installer = crate::stores::installer(store);
+            let found = installer.find();
+            let signed_in = installer.signed_in();
+
+            ui.horizontal(|ui| {
+                ui.painter().circle_filled(
+                    ui.cursor().min + Vec2::new(6.0, 9.0),
+                    5.0,
+                    store.accent(),
+                );
+                ui.add_space(16.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(store.name()).size(14.0).color(Palette::TEXT));
+                    let detail = match (&found, signed_in) {
+                        (Some(_), Some(true)) => {
+                            format!("{} ready · signed in", installer.program)
+                        }
+                        (Some(_), Some(false)) => {
+                            format!(
+                                "{} found · sign in with: {}",
+                                installer.program, installer.sign_in
+                            )
+                        }
+                        (Some(_), None) => format!("{} found", installer.program),
+                        (None, _) => format!("{} not installed", installer.program),
+                    };
+                    ui.label(RichText::new(detail).size(11.5).color(Palette::TEXT_FAINT));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if found.is_none()
+                        && ui
+                            .button("Get it")
+                            .on_hover_text(installer.homepage)
+                            .clicked()
+                    {
+                        match crate::util::open_url(installer.homepage) {
+                            Ok(()) => app.notify("Opening the downloader's page"),
+                            Err(e) => app.notify_error(&format!("Could not open: {e}")),
+                        }
+                    }
+                });
+            });
+            ui.add_space(6.0);
+        }
+
+        // Installing a title is a per-game action, so the button lives in the
+        // details panel; this list is only about what is available.
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Open a game's details to install it without its store client.")
+                .size(11.0)
+                .color(Palette::TEXT_FAINT),
+        );
     });
 }
 

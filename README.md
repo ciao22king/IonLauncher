@@ -35,6 +35,12 @@ smooth on older hardware.
   want to see a lot at once.
 - **Favourites.** Star the games you actually play and find them in one click.
 - **Real playtime and size.** Read from each store's metadata, not guessed.
+- **Store pages.** Open any game's Steam, Epic or GOG page in your browser to
+  buy it or browse, straight from the details panel or the card menu.
+- **Install without the store client.** When a community downloader is present
+  — `legendary` for Epic, `gogdl` for GOG, `steamcmd` for Steam — IonLauncher
+  starts the download in the background and logs it. Settings shows which
+  downloaders were found and how to get the missing ones.
 
 ## Supported platforms
 

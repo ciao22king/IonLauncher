@@ -121,6 +121,60 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 }
             });
 
+            // A title that is owned but not installed is invisible to the
+            // scanner, so reaching its storefront from the library is the way
+            // back to it — and to buying it, when it is not owned yet.
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if widgets::secondary_button(ui, "🛒  Open store page").clicked() {
+                    match crate::stores::open_store_page(&game) {
+                        Ok(()) => app.notify("Opening the store page in your browser"),
+                        Err(e) => app.notify_error(&format!("Could not open the browser: {e}")),
+                    }
+                }
+
+                // Downloading without the store client is delegated to the
+                // community downloader for that store. When it is missing the
+                // button still explains what to install, rather than hiding
+                // the capability.
+                let installer = crate::stores::installer(game.store);
+                let installed = installer.find().is_some();
+                let label = if installed {
+                    format!("⤓  Install with {}", installer.program)
+                } else {
+                    "⤓  Install without the client".to_string()
+                };
+                if widgets::secondary_button(ui, &label).clicked() {
+                    if !installed {
+                        app.notify_error(&format!(
+                            "{} is not installed — see {}",
+                            installer.program, installer.homepage
+                        ));
+                    } else {
+                        match installer.install(&game) {
+                            Ok(log) => app.notify(&format!(
+                                "Installing in the background · log: {}",
+                                log.display()
+                            )),
+                            Err(e) => app.notify_error(&format!("Install failed: {e}")),
+                        }
+                    }
+                }
+            });
+
+            // When the downloader is missing, showing the exact command is
+            // more useful than a dead end: it can be run once it is installed.
+            let installer = crate::stores::installer(game.store);
+            if installer.find().is_none() {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(installer.install_command(&game))
+                        .size(11.0)
+                        .monospace()
+                        .color(Palette::TEXT_FAINT),
+                );
+            }
+
             ui.add_space(16.0);
             widgets::section_heading(ui, "Statistics");
             ui.add_space(6.0);

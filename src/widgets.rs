@@ -20,6 +20,7 @@ pub enum CardAction {
     Launch,
     Details,
     ToggleFavorite,
+    StorePage,
 }
 
 /// Draws a portrait cover card and reports interaction.

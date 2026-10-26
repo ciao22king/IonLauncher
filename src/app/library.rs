@@ -311,6 +311,10 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
             ui.close();
         }
         ui.separator();
+        if ui.button("🛒  Open store page").clicked() {
+            action = CardAction::StorePage;
+            ui.close();
+        }
         if ui.button("Details").clicked() {
             action = CardAction::Details;
             ui.close();
@@ -325,6 +329,7 @@ fn apply(app: &mut IonApp, id: &str, action: CardAction) {
         CardAction::Launch => app.launch(id),
         CardAction::Details => app.details_for = Some(id.to_string()),
         CardAction::ToggleFavorite => app.toggle_favorite(id),
+        CardAction::StorePage => app.open_store_page(id),
     }
 }
 

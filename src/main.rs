@@ -16,6 +16,7 @@ mod model;
 mod proton;
 mod providers;
 mod sqlite;
+mod stores;
 mod theme;
 mod ui;
 mod update;

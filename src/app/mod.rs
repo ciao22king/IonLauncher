@@ -437,6 +437,18 @@ impl IonApp {
         ))
     }
 
+    /// Opens a game's storefront page in the browser.
+    pub fn open_store_page(&mut self, game_id: &str) {
+        let Some(game) = self.games.iter().find(|g| g.id == game_id) else {
+            return;
+        };
+        let game = game.clone();
+        match crate::stores::open_store_page(&game) {
+            Ok(()) => self.notify("Opening the store page in your browser"),
+            Err(e) => self.notify_error(&format!("Could not open the browser: {e}")),
+        }
+    }
+
     pub fn toggle_favorite(&mut self, game_id: &str) {
         let now_favorite = self.config.toggle_favorite(game_id);
         self.config_dirty = true;
