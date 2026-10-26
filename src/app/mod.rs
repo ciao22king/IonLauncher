@@ -4,7 +4,7 @@ use crate::art::ArtLoader;
 use crate::config::{Config, SortMode};
 use crate::model::{Game, LaunchTarget, ScanReport};
 use crate::providers;
-use crate::theme::Palette;
+use crate::theme::{space, text, Palette};
 use egui::{Context, RichText, Vec2};
 use std::sync::mpsc::{channel, Receiver};
 
@@ -84,6 +84,17 @@ pub struct IonApp {
     pub update_ready: Option<String>,
     /// Receive channel for the background update check.
     pub update_rx: Option<Receiver<Result<Option<crate::update::Update>, String>>>,
+    /// In-flight download of a community downloader, by store.
+    pub downloader_download: Option<(
+        crate::model::Store,
+        std::sync::Arc<crate::util::DownloadProgress>,
+    )>,
+    /// Code the user pasted from a store's sign-in page, per store.
+    pub auth_code: std::collections::HashMap<crate::model::Store, String>,
+    /// Set while a sign-in is being completed, by store.
+    pub signing_in: Option<crate::model::Store>,
+    /// Receive channel for the background sign-in.
+    pub sign_in_rx: Option<Receiver<Result<std::path::PathBuf, String>>>,
 }
 
 /// Cached result of filtering and sorting, so the grid does not re-sort
@@ -143,6 +154,10 @@ impl IonApp {
             update_download: None,
             update_ready: None,
             update_rx: None,
+            downloader_download: None,
+            auth_code: std::collections::HashMap::new(),
+            signing_in: None,
+            sign_in_rx: None,
         };
         app.rescan();
         app.refresh_proton();
@@ -449,6 +464,101 @@ impl IonApp {
         }
     }
 
+    /// Downloads a store's clientless downloader in the background.
+    pub fn download_downloader(&mut self, store: crate::model::Store) {
+        if self.downloader_download.is_some() {
+            return;
+        }
+        let installer = crate::stores::installer(store);
+        if !installer.downloadable() {
+            self.notify_error(&format!(
+                "{} is not distributed as a standalone binary — see {}",
+                installer.program, installer.homepage
+            ));
+            return;
+        }
+        let progress = crate::util::DownloadProgress::new();
+        self.downloader_download = Some((store, progress.clone()));
+        installer.download(progress);
+    }
+
+    /// Opens the store's own sign-in page in the browser.
+    ///
+    /// The password is typed on the store's page, never here: only the code
+    /// that page returns is handed to the downloader afterwards.
+    pub fn open_sign_in_page(&mut self, store: crate::model::Store) {
+        let installer = crate::stores::installer(store);
+        let Some(url) = installer.auth_url() else {
+            self.notify_error(&format!(
+                "{} signs in through its own prompt: {}",
+                installer.program, installer.sign_in
+            ));
+            return;
+        };
+        match crate::util::open_url(url) {
+            Ok(()) => self.notify("Sign in on the page that just opened, then paste the code"),
+            Err(e) => self.notify_error(&format!("Could not open the browser: {e}")),
+        }
+    }
+
+    /// Finishes a sign-in with the code pasted from the store's page.
+    ///
+    /// Runs on a worker: the downloaders take a moment to exchange the code,
+    /// and blocking the frame thread on a network round-trip would stall the
+    /// whole UI.
+    pub fn complete_sign_in(&mut self, store: crate::model::Store) {
+        if self.signing_in.is_some() {
+            return;
+        }
+        let code = self.auth_code.get(&store).cloned().unwrap_or_default();
+        if code.trim().is_empty() {
+            self.notify_error("Paste the code from the sign-in page first");
+            return;
+        }
+        self.signing_in = Some(store);
+
+        let installer = crate::stores::installer(store);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = installer.sign_in_with_code(&code);
+            let _ = tx.send(result);
+        });
+        self.sign_in_rx = Some(rx);
+    }
+
+    /// Collects the outcome of a finished downloader download or sign-in.
+    pub fn poll_stores(&mut self) {
+        let finished = self
+            .downloader_download
+            .as_ref()
+            .is_some_and(|(_, progress)| progress.is_done());
+        if finished {
+            let (store, progress) = self.downloader_download.take().expect("checked above");
+            let installer = crate::stores::installer(store);
+            if let Some(err) = progress.error() {
+                self.notify_error(&format!("Could not download {}: {err}", installer.program));
+            } else {
+                self.notify(&format!("{} is ready", installer.program));
+            }
+        }
+
+        if let Some(rx) = &self.sign_in_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.sign_in_rx = None;
+                let store = self.signing_in.take();
+                match result {
+                    Ok(_) => {
+                        if let Some(store) = store {
+                            self.auth_code.remove(&store);
+                            self.notify(&format!("Signed in to {}", store.name()));
+                        }
+                    }
+                    Err(e) => self.notify_error(&format!("Sign-in failed: {e}")),
+                }
+            }
+        }
+    }
+
     pub fn toggle_favorite(&mut self, game_id: &str) {
         let now_favorite = self.config.toggle_favorite(game_id);
         self.config_dirty = true;
@@ -557,6 +667,7 @@ impl eframe::App for IonApp {
         self.poll_artwork(&ctx);
         self.poll_proton();
         self.poll_update();
+        self.poll_stores();
         self.refresh_view();
         self.paint_toast(&ctx);
         self.handle_shortcuts(&ctx);
@@ -566,28 +677,33 @@ impl eframe::App for IonApp {
             .frame(crate::ui::topbar_frame())
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("ION")
-                            .size(19.0)
-                            .strong()
-                            .color(Palette::ACCENT),
+                    // A global search field, always reachable. Typing in it
+                    // routes to the Search page, which owns the results grid.
+                    let width = (ui.available_width() - 260.0).clamp(180.0, 460.0);
+                    let response = ui.add_sized(
+                        Vec2::new(width, 32.0),
+                        egui::TextEdit::singleline(&mut self.search)
+                            .hint_text("Search your games…")
+                            .desired_width(f32::INFINITY),
                     );
-                    ui.label(
-                        RichText::new("LAUNCHER")
-                            .size(19.0)
-                            .strong()
-                            .color(Palette::TEXT),
-                    );
+                    if response.gained_focus() {
+                        self.screen = Screen::Search;
+                    }
+                    if response.changed() {
+                        self.view_cache = None;
+                        self.screen = Screen::Search;
+                    }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let label = if self.scanning {
-                            "⟳  Scanning…"
+                            "Scanning…"
                         } else {
-                            "⟳  Refresh"
+                            "Refresh"
                         };
-                        let button = egui::Button::new(RichText::new(label).size(13.0))
-                            .fill(Palette::SURFACE_HOVER);
+                        let button = egui::Button::new(RichText::new(label).size(text::SM))
+                            .fill(Palette::SURFACE_HOVER)
+                            .stroke(egui::Stroke::new(1.0, Palette::BORDER_STRONG))
+                            .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS_MD));
                         if ui
                             .add_enabled(!self.scanning, button)
                             .on_hover_text("Rescan the stores for installed games")
@@ -602,7 +718,11 @@ impl eframe::App for IonApp {
                             } else {
                                 format!("{} games · {} ms", self.games.len(), report.elapsed_ms)
                             };
-                            ui.label(RichText::new(text).size(11.5).color(Palette::TEXT_FAINT));
+                            ui.label(
+                                RichText::new(text)
+                                    .size(text::XS)
+                                    .color(Palette::TEXT_FAINT),
+                            );
                         }
                     });
                 });
@@ -658,6 +778,8 @@ impl IonApp {
             || self.proton_download.is_some()
             || self.update_checking
             || self.update_download.is_some()
+            || self.downloader_download.is_some()
+            || self.signing_in.is_some()
             || self.toast.is_some()
             || self.games.iter().any(|g| g.art_pending);
         if busy {
@@ -701,31 +823,47 @@ impl IonApp {
             self.toast = None;
             return;
         }
-        let color = if toast.is_error {
-            Palette::DANGER
+        let (color, icon) = if toast.is_error {
+            (Palette::DANGER, "✕")
         } else {
-            Palette::OK
+            (Palette::OK, "✓")
         };
         let text = toast.text.clone();
         egui::Area::new(egui::Id::unique("toast"))
-            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -18.0))
+            .anchor(egui::Align2::CENTER_BOTTOM, Vec2::new(0.0, -space::LG))
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(Palette::SURFACE)
-                    .stroke(egui::Stroke::new(1.0, color))
-                    .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS_CONTROL))
-                    .inner_margin(egui::Margin::symmetric(14, 9))
+                    .stroke(egui::Stroke::new(1.0, Palette::BORDER_STRONG))
+                    .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS_LG))
+                    .inner_margin(egui::Margin::symmetric(space::LG as i8, space::MD as i8))
                     .shadow(egui::epaint::Shadow {
-                        offset: [0, 4],
-                        blur: 14,
+                        offset: [0, 6],
+                        blur: 20,
                         spread: 0,
-                        color: egui::Color32::from_black_alpha(150),
+                        color: egui::Color32::from_black_alpha(170),
                     })
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new("●").size(11.0).color(color));
-                            ui.label(RichText::new(text).size(13.0).color(Palette::TEXT));
+                            // A solid status dot carries the success/error
+                            // meaning, which a border colour alone does not for
+                            // a colour-blind reader.
+                            let (rect, _) =
+                                ui.allocate_exact_size(Vec2::new(16.0, 16.0), egui::Sense::hover());
+                            ui.painter().circle_filled(
+                                rect.center(),
+                                8.0,
+                                Palette::tint(color, 40),
+                            );
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                icon,
+                                egui::FontId::proportional(9.0),
+                                color,
+                            );
+                            ui.label(RichText::new(text).size(text::SM).color(Palette::TEXT));
                         });
                     });
             });

@@ -70,7 +70,7 @@ Two packages are published, both for x86_64.
 **Debian package.** Download `ionlauncher_<version>_amd64.deb` and install it:
 
 ```sh
-sudo apt install ./ionlauncher_1.0.0_amd64.deb
+sudo apt install ./ionlauncher_1.1.0_amd64.deb
 ```
 
 This puts the binary in `/usr/bin`, adds IonLauncher to your applications menu
@@ -81,8 +81,8 @@ Remove it with `sudo apt remove ionlauncher`.
 executable and run it:
 
 ```sh
-chmod +x ionlauncher-1.0.0-x86_64.AppImage
-./ionlauncher-1.0.0-x86_64.AppImage
+chmod +x ionlauncher-1.1.0-x86_64.AppImage
+./ionlauncher-1.1.0-x86_64.AppImage
 ```
 
 The AppImage needs no installation and no root, which suits a machine you do

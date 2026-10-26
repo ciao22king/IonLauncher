@@ -4,22 +4,55 @@
 //! switches what you are doing rather than splitting Steam from GOG.
 
 use crate::app::{IonApp, Screen};
-use crate::theme::{Palette, RADIUS_CONTROL};
+use crate::theme::{space, text, Palette, RADIUS_MD};
 use egui::{CornerRadius, RichText, Sense, Vec2};
 
 pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.add_space(2.0);
-
     let installed = app.games.len();
     let favorites = app.config.favorites.len();
-
-    section(ui, "LIBRARY");
-    ui.add_space(2.0);
     let on_library = app.screen == Screen::Library;
+
+    // Brand lockup: a bolt mark plus the wordmark, sized to read as the
+    // product name rather than another nav item.
+    ui.horizontal(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(28.0, 28.0), Sense::hover());
+        let painter = ui.painter();
+        painter.rect_filled(
+            rect,
+            CornerRadius::same(8),
+            crate::theme::Palette::accent_subtle(),
+        );
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "⚡",
+            egui::FontId::proportional(15.0),
+            Palette::ACCENT,
+        );
+        ui.add_space(space::SM);
+        ui.vertical(|ui| {
+            ui.label(
+                RichText::new("IonLauncher")
+                    .size(text::BASE)
+                    .strong()
+                    .color(Palette::TEXT),
+            );
+            ui.label(
+                RichText::new("One library, three stores")
+                    .size(text::XS)
+                    .color(Palette::TEXT_FAINT),
+            );
+        });
+    });
+
+    ui.add_space(space::LG);
+    ui.add_space(space::SM);
+
+    section(ui, "Library");
     if nav_item(
         ui,
         "▤",
-        "Installed games",
+        "Installed",
         Some(installed),
         on_library && !app.favorites_only,
     ) {
@@ -42,9 +75,8 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
         app.view_cache = None;
     }
 
-    ui.add_space(14.0);
-    section(ui, "APP");
-    ui.add_space(2.0);
+    ui.add_space(space::MD);
+    section(ui, "App");
     if nav_item(ui, "⚙", "Settings", None, app.screen == Screen::Settings) {
         app.screen = Screen::Settings;
     }
@@ -52,7 +84,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     // A quiet footer: which stores fed the library and how much each gave.
     // Informational only — there is nothing here to filter by.
     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         for store in crate::model::Store::ALL.iter().rev() {
             let count = app.games.iter().filter(|g| g.store == *store).count();
             let enabled = app.config.enabled(*store);
@@ -66,30 +98,45 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                         Palette::TEXT_FAINT
                     },
                 );
-                ui.add_space(14.0);
-                let text = if enabled {
-                    format!("{}  {count}", store.short())
+                ui.add_space(space::LG);
+                let label = if enabled {
+                    store.short().to_string()
                 } else {
-                    format!("{}  off", store.short())
+                    format!("{} · off", store.short())
                 };
-                ui.label(RichText::new(text).size(11.5).color(Palette::TEXT_FAINT));
+                ui.label(
+                    RichText::new(label)
+                        .size(text::XS)
+                        .color(Palette::TEXT_FAINT),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(count.to_string())
+                            .size(text::XS)
+                            .color(Palette::TEXT_FAINT),
+                    );
+                });
             });
-            ui.add_space(3.0);
+            ui.add_space(space::XS);
         }
-        ui.add_space(6.0);
-        ui.label(
-            RichText::new("One library, three stores")
-                .size(10.5)
-                .color(Palette::TEXT_FAINT),
-        );
+        ui.add_space(space::XS);
     });
 }
 
 fn section(ui: &mut egui::Ui, label: &str) {
-    ui.label(RichText::new(label).size(10.5).color(Palette::TEXT_FAINT));
+    ui.add_space(space::XS);
+    ui.label(
+        RichText::new(label)
+            .size(text::XS)
+            .color(Palette::TEXT_FAINT),
+    );
+    ui.add_space(space::XS);
 }
 
 /// A full-width menu row. Returns true when clicked.
+///
+/// The active row gets a solid accent bar on its leading edge plus a tinted
+/// background, so selection is legible even for a colour-blind reader.
 fn nav_item(
     ui: &mut egui::Ui,
     icon: &str,
@@ -97,14 +144,14 @@ fn nav_item(
     count: Option<usize>,
     selected: bool,
 ) -> bool {
-    let height = 34.0;
+    let height = 36.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
 
     if ui.is_rect_visible(rect) {
         let hovered = response.hovered();
         let fill = if selected {
-            Palette::ACCENT_DIM
+            Palette::accent_subtle()
         } else if hovered {
             Palette::SURFACE_HOVER
         } else {
@@ -112,30 +159,44 @@ fn nav_item(
         };
         if fill != egui::Color32::TRANSPARENT {
             ui.painter()
-                .rect_filled(rect, CornerRadius::same(RADIUS_CONTROL), fill);
+                .rect_filled(rect, CornerRadius::same(RADIUS_MD), fill);
+        }
+        if selected {
+            // The accent bar: a rounded strip on the leading edge.
+            let bar = egui::Rect::from_min_size(
+                egui::pos2(rect.min.x + 2.0, rect.center().y - 9.0),
+                Vec2::new(3.0, 18.0),
+            );
+            ui.painter()
+                .rect_filled(bar, CornerRadius::same(2), Palette::ACCENT);
         }
 
         let text_color = if selected {
-            Palette::TEXT
+            Palette::ACCENT
         } else {
             Palette::TEXT_MUTED
         };
         let mut child = ui.new_child(
             egui::UiBuilder::new()
-                .max_rect(rect.shrink2(Vec2::new(10.0, 0.0)))
+                .max_rect(rect.shrink2(Vec2::new(14.0, 0.0)))
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        child.label(RichText::new(icon).size(13.0).color(text_color));
-        child.add_space(8.0);
-        child.label(RichText::new(label).size(13.0).color(text_color));
+        child.label(RichText::new(icon).size(14.0).color(text_color));
+        child.add_space(space::SM);
+        child.label(RichText::new(label).size(text::SM).color(if selected {
+            Palette::TEXT
+        } else {
+            Palette::TEXT_MUTED
+        }));
 
         if let Some(count) = count {
             child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    RichText::new(count.to_string())
-                        .size(11.5)
-                        .color(Palette::TEXT_FAINT),
-                );
+                let color = if selected {
+                    Palette::ACCENT
+                } else {
+                    Palette::TEXT_FAINT
+                };
+                ui.label(RichText::new(count.to_string()).size(text::XS).color(color));
             });
         }
     }

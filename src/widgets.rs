@@ -6,7 +6,7 @@
 //! even with hundreds of cards on a software or integrated GPU.
 
 use crate::model::{Game, LaunchTarget, Store};
-use crate::theme::{Palette, RADIUS_CARD, RADIUS_CHIP};
+use crate::theme::{space, text, Palette, RADIUS_LG, RADIUS_MD};
 use crate::util;
 use egui::{
     Align2, Color32, CornerRadius, FontId, Mesh, Rect, Response, RichText, Sense, Shape, Stroke,
@@ -44,52 +44,35 @@ pub fn game_card(
         };
 
         let painter = ui.painter();
-        painter.rect_filled(rect, CornerRadius::same(RADIUS_CARD), fill);
+        painter.rect_filled(rect, CornerRadius::same(RADIUS_LG), fill);
 
-        // Cover art, cropped to fill the top area. Cropping rather than
+        // Cover art, inset by a hairline so the card reads as a frame around
+        // the artwork rather than a colour behind it. Cropping rather than
         // stretching keeps the artwork's own proportions, which matters
         // because the stores ship a mix of portrait and square covers.
-        let art_height = (size.y * 0.72).max(0.0);
-        let art_rect = Rect::from_min_size(rect.min, Vec2::new(size.x, art_height));
-        let rounded_art = Rect::from_min_max(
-            rect.min + Vec2::new(1.0, 1.0),
-            egui::pos2(rect.max.x - 1.0, art_rect.max.y),
-        );
+        let art_rect = rect.shrink(1.0);
         match &game.art {
-            Some(texture) => paint_cover(ui, rounded_art, texture, RADIUS_CARD, fill, Corners::TOP),
-            None => paint_art_placeholder(ui, rounded_art, game),
+            Some(texture) => paint_cover(ui, art_rect, texture, RADIUS_LG, fill, Corners::ALL),
+            None => paint_art_placeholder(ui, art_rect, game),
         }
 
-        // A solid band behind the title keeps text legible over bright
-        // artwork without darkening the cover itself.
-        let text_top = art_rect.max.y;
-        let text_rect = Rect::from_min_max(
-            egui::pos2(rect.min.x, text_top),
-            egui::pos2(rect.max.x, rect.max.y),
-        );
-        painter.rect_filled(
-            text_rect,
-            CornerRadius {
-                nw: 0,
-                ne: 0,
-                sw: RADIUS_CARD,
-                se: RADIUS_CARD,
-            },
-            fill,
-        );
-
-        paint_card_text(ui, text_rect, game, compact, hovered);
-        paint_store_badge(ui, rect, game.store);
+        // A scrim behind the text keeps it legible over bright artwork without
+        // darkening the cover itself. Drawn only across the lower band.
+        paint_text_scrim(ui, art_rect);
+        paint_card_text(ui, art_rect, game, compact, hovered);
+        paint_store_badge(ui, art_rect, game.store);
 
         if favorite {
-            paint_star_badge(ui, rect);
+            paint_star_badge(ui, art_rect);
         }
 
-        // Hover ring, drawn last so it sits on top of the artwork.
+        // Hover: a play affordance over the art and an accent ring, drawn last
+        // so they sit on top of the artwork.
         if hovered {
+            paint_play_affordance(ui, art_rect);
             painter.rect_stroke(
                 rect,
-                CornerRadius::same(RADIUS_CARD),
+                CornerRadius::same(RADIUS_LG),
                 Stroke::new(1.5, Palette::ACCENT),
                 StrokeKind::Inside,
             );
@@ -108,15 +91,19 @@ pub fn game_card(
         action = CardAction::Launch;
     }
     response.context_menu(|ui| {
-        if ui.button("▶  Launch").clicked() {
+        if ui.button("Launch").clicked() {
             action = CardAction::Launch;
             ui.close();
         }
-        if ui.button("★  Toggle favourite").clicked() {
+        if ui.button("Toggle favourite").clicked() {
             action = CardAction::ToggleFavorite;
             ui.close();
         }
         ui.separator();
+        if ui.button("Open store page").clicked() {
+            action = CardAction::StorePage;
+            ui.close();
+        }
         if ui.button("Details").clicked() {
             action = CardAction::Details;
             ui.close();
@@ -134,12 +121,7 @@ pub struct Corners {
 }
 
 impl Corners {
-    /// Card covers: the title band below already rounds the bottom.
-    pub const TOP: Self = Self {
-        top: true,
-        bottom: false,
-    };
-    /// Free-standing covers: details sheet and list thumbnails.
+    /// Every corner rounded: card covers and list thumbnails.
     pub const ALL: Self = Self {
         top: true,
         bottom: true,
@@ -253,13 +235,8 @@ fn paint_art_placeholder(ui: &Ui, rect: Rect, game: &Game) {
     let accent = game.store.accent();
     painter.rect_filled(
         rect,
-        CornerRadius {
-            nw: RADIUS_CARD,
-            ne: RADIUS_CARD,
-            sw: 0,
-            se: 0,
-        },
-        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 26),
+        CornerRadius::same(RADIUS_LG),
+        Palette::tint(accent, 30),
     );
 
     let initials = initials_of(&game.title);
@@ -267,8 +244,8 @@ fn paint_art_placeholder(ui: &Ui, rect: Rect, game: &Game) {
         rect.center(),
         Align2::CENTER_CENTER,
         initials,
-        FontId::proportional((rect.height() * 0.30).clamp(20.0, 56.0)),
-        Color32::from_rgba_unmultiplied(accent.r(), accent.g(), accent.b(), 150),
+        FontId::proportional((rect.height() * 0.28).clamp(20.0, 52.0)),
+        Palette::tint(accent, 170),
     );
 }
 
@@ -292,18 +269,45 @@ fn initials_of(title: &str) -> String {
     }
 }
 
+/// A vertical scrim over the lower third of the cover, fading from transparent
+/// to near-black, so overlaid text stays readable on any artwork.
+fn paint_text_scrim(ui: &Ui, rect: Rect) {
+    let painter = ui.painter();
+    let top = rect.max.y - rect.height() * 0.42;
+    let steps = 16;
+    let mut mesh = Mesh::default();
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        let y = top + (rect.max.y - top) * t;
+        // Quadratic ramp: mostly clear at the top, solid at the bottom edge.
+        let alpha = (t * t * 205.0) as u8;
+        let color = Color32::from_rgba_unmultiplied(0x06, 0x06, 0x08, alpha);
+        mesh.colored_vertex(egui::pos2(rect.min.x, y), color);
+        mesh.colored_vertex(egui::pos2(rect.max.x, y), color);
+        if i > 0 {
+            let base = (i as u32 - 1) * 2;
+            mesh.add_triangle(base, base + 1, base + 2);
+            mesh.add_triangle(base + 1, base + 2, base + 3);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
+}
+
 fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: bool) {
     let painter = ui.painter();
-    let pad = 9.0;
+    let pad = space::MD;
     let inner = Rect::from_min_max(
-        egui::pos2(rect.min.x + pad, rect.min.y + 5.0),
-        egui::pos2(rect.max.x - pad, rect.max.y - 5.0),
+        egui::pos2(
+            rect.min.x + pad,
+            rect.max.y - if compact { 46.0 } else { 50.0 },
+        ),
+        egui::pos2(rect.max.x - pad, rect.max.y - space::MD),
     );
     if inner.width() <= 4.0 || inner.height() <= 4.0 {
         return;
     }
 
-    let title_size = if compact { 12.5 } else { 13.5 };
+    let title_size = if compact { text::SM } else { 14.0 };
     // Two rows maximum, elided with "…" when the title is longer. Without the
     // row limit a long title is simply clipped mid-glyph by the band.
     let galley = painter.layout_job(elided_job(
@@ -313,7 +317,7 @@ fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: boo
         inner.width(),
         2,
     ));
-    let title_height = galley.size().y.min(inner.height() * 0.72);
+    let title_height = galley.size().y.min(inner.height() * 0.7);
     painter.galley(inner.min, galley, Palette::TEXT);
 
     // Metadata line: store, then playtime or size when known.
@@ -328,7 +332,7 @@ fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: boo
     }
 
     let meta_rect = Rect::from_min_max(
-        egui::pos2(inner.min.x, inner.min.y + title_height + 2.0),
+        egui::pos2(inner.min.x, inner.min.y + title_height + 3.0),
         inner.max,
     );
     if meta_rect.height() >= 10.0 {
@@ -339,7 +343,7 @@ fn paint_card_text(ui: &Ui, rect: Rect, game: &Game, compact: bool, hovered: boo
         };
         let galley = painter.layout_job(elided_job(
             &meta.join("  ·  "),
-            FontId::proportional(11.0),
+            FontId::proportional(text::XS),
             color,
             meta_rect.width(),
             1,
@@ -378,65 +382,107 @@ pub fn elided_job(
     job
 }
 
-/// A small dot in the store's brand colour, top-left of the card.
+/// A store pill in the brand colour, top-left of the card: a filled dot plus
+/// the store's short name, so the store is legible without decoding a colour.
 fn paint_store_badge(ui: &Ui, rect: Rect, store: Store) {
     let painter = ui.painter();
-    let center = egui::pos2(rect.min.x + 14.0, rect.min.y + 14.0);
-    painter.circle_filled(center, 6.0, Color32::from_black_alpha(150));
-    painter.circle_filled(center, 4.0, store.accent());
+    let accent = store.accent();
+    let label = store.short();
+
+    let galley =
+        painter.layout_no_wrap(label.to_string(), FontId::proportional(10.5), Palette::TEXT);
+    let pad_x = 7.0;
+    let dot = 6.0;
+    let gap = 5.0;
+    let pill_w = pad_x * 2.0 + dot + gap + galley.size().x;
+    let pill_h = 18.0;
+    let pill = Rect::from_min_size(
+        rect.min + Vec2::new(space::SM, space::SM),
+        Vec2::new(pill_w, pill_h),
+    );
+    let radius = CornerRadius::same((pill_h / 2.0) as u8);
+
+    painter.rect_filled(pill, radius, Color32::from_black_alpha(165));
+    painter.circle_filled(
+        egui::pos2(pill.min.x + pad_x + dot / 2.0, pill.center().y),
+        dot / 2.0,
+        accent,
+    );
+    painter.galley(
+        egui::pos2(
+            pill.min.x + pad_x + dot + gap,
+            pill.center().y - galley.size().y / 2.0,
+        ),
+        galley,
+        Palette::TEXT,
+    );
 }
 
 /// Star badge shown on favourite cards, top-right.
 fn paint_star_badge(ui: &Ui, rect: Rect) {
     let painter = ui.painter();
-    let center = egui::pos2(rect.max.x - 15.0, rect.min.y + 15.0);
-    painter.circle_filled(center, 8.0, Color32::from_black_alpha(150));
+    let center = egui::pos2(rect.max.x - 17.0, rect.min.y + 17.0);
+    painter.circle_filled(center, 11.0, Color32::from_black_alpha(165));
     painter.text(
         center,
         Align2::CENTER_CENTER,
         "★",
-        FontId::proportional(11.0),
-        Color32::from_rgb(0xF5, 0xC2, 0x42),
+        FontId::proportional(12.0),
+        Palette::WARNING,
     );
+}
+
+/// A circular play affordance centred over the artwork, shown on hover.
+fn paint_play_affordance(ui: &Ui, rect: Rect) {
+    let painter = ui.painter();
+    let center = egui::pos2(rect.center().x, rect.center().y - rect.height() * 0.06);
+    painter.circle_filled(center, 24.0, Palette::tint(Palette::ACCENT, 230));
+    // A right-pointing triangle, offset a touch so it reads as optically centred.
+    let s = 9.0;
+    let points = vec![
+        egui::pos2(center.x - s * 0.5 + 1.5, center.y - s),
+        egui::pos2(center.x - s * 0.5 + 1.5, center.y + s),
+        egui::pos2(center.x + s * 0.8 + 1.5, center.y),
+    ];
+    painter.add(Shape::convex_polygon(
+        points,
+        Palette::ON_ACCENT,
+        Stroke::NONE,
+    ));
 }
 
 /// A pill-shaped filter chip. Returns true when clicked.
 pub fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -> bool {
-    let text = RichText::new(label).size(12.5);
-    let text = if selected {
-        text.color(Color32::WHITE)
-    } else {
-        text.color(Palette::TEXT_MUTED)
-    };
     let galley = ui.painter().layout_no_wrap(
         label.to_string(),
         FontId::proportional(12.5),
         if selected {
-            Color32::WHITE
+            Palette::ON_ACCENT
         } else {
             Palette::TEXT_MUTED
         },
     );
-    let padding = Vec2::new(11.0, 6.0);
+    let padding = Vec2::new(13.0, 7.0);
     let size = galley.size() + padding * 2.0;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
+        let radius = CornerRadius::same((rect.height() / 2.0) as u8);
         let (fill, stroke_color) = if selected {
             (
-                accent.unwrap_or(Palette::ACCENT_DIM),
+                accent.unwrap_or(Palette::ACCENT),
                 accent.unwrap_or(Palette::ACCENT),
             )
         } else if response.hovered() {
-            (Palette::CARD_HOVER, Palette::BORDER)
+            (Palette::CARD_HOVER, Palette::BORDER_STRONG)
         } else {
             (Palette::SURFACE_HOVER, Palette::BORDER)
         };
-        painter.rect_filled(rect, CornerRadius::same(RADIUS_CHIP), fill);
+        painter.rect_filled(rect, radius, fill);
         painter.rect_stroke(
             rect,
-            CornerRadius::same(RADIUS_CHIP),
+            radius,
             Stroke::new(1.0, stroke_color),
             StrokeKind::Inside,
         );
@@ -444,49 +490,101 @@ pub fn chip(ui: &mut Ui, label: &str, selected: bool, accent: Option<Color32>) -
             rect.center() - galley.size() / 2.0,
             galley,
             if selected {
-                Color32::WHITE
+                Palette::ON_ACCENT
             } else {
                 Palette::TEXT_MUTED
             },
         );
     }
-    let _ = text;
-    response.clicked()
+    response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .clicked()
 }
 
 /// A labelled stat, e.g. `Playtime / 42.5 h`. Skips itself when empty.
 pub fn stat(ui: &mut Ui, label: &str, value: &str) {
     ui.vertical(|ui| {
-        ui.label(RichText::new(label).size(10.5).color(Palette::TEXT_FAINT));
-        ui.label(RichText::new(value).size(13.0).color(Palette::TEXT));
+        ui.label(
+            RichText::new(label)
+                .size(text::XS)
+                .color(Palette::TEXT_FAINT),
+        );
+        ui.label(RichText::new(value).size(text::SM).color(Palette::TEXT));
     });
 }
 
-/// A large primary action button.
+/// A large primary action button: solid accent, near-black text for contrast.
 pub fn primary_button(ui: &mut Ui, label: &str, width: f32) -> Response {
-    let button = egui::Button::new(RichText::new(label).size(14.0).color(Color32::WHITE))
-        .fill(Palette::ACCENT)
-        .corner_radius(CornerRadius::same(RADIUS_CARD))
-        .min_size(Vec2::new(width, 38.0));
+    let button = egui::Button::new(
+        RichText::new(label)
+            .size(14.0)
+            .strong()
+            .color(Palette::ON_ACCENT),
+    )
+    .fill(Palette::ACCENT)
+    .corner_radius(CornerRadius::same(RADIUS_MD))
+    .min_size(Vec2::new(width, 40.0));
     ui.add(button)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A secondary, quieter button.
+/// A secondary, quieter button: hairline border on a raised surface.
 pub fn secondary_button(ui: &mut Ui, label: &str) -> Response {
-    let button = egui::Button::new(RichText::new(label).size(13.0).color(Palette::TEXT))
+    let button = egui::Button::new(RichText::new(label).size(text::SM).color(Palette::TEXT))
         .fill(Palette::SURFACE_HOVER)
-        .stroke(Stroke::new(1.0, Palette::BORDER))
-        .corner_radius(CornerRadius::same(RADIUS_CARD));
+        .stroke(Stroke::new(1.0, Palette::BORDER_STRONG))
+        .corner_radius(CornerRadius::same(RADIUS_MD));
     ui.add(button)
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-/// A section heading with a muted rule underneath.
-pub fn section_heading(ui: &mut Ui, text: &str) {
-    ui.label(RichText::new(text).size(15.0).strong().color(Palette::TEXT));
+/// A section heading in sentence case, with a muted rule underneath.
+pub fn section_heading(ui: &mut Ui, text_str: &str) {
+    ui.label(
+        RichText::new(text_str)
+            .size(text::BASE)
+            .strong()
+            .color(Palette::TEXT),
+    );
+    ui.add_space(space::XS);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
     ui.painter()
         .rect_filled(rect, CornerRadius::ZERO, Palette::BORDER);
-    ui.add_space(2.0);
+    ui.add_space(space::SM);
+}
+
+/// A small status pill: a coloured dot plus a label, used for store and
+/// account state in Settings.
+pub fn status_pill(ui: &mut Ui, label: &str, color: Color32) {
+    let galley = ui.painter().layout_no_wrap(
+        label.to_string(),
+        FontId::proportional(11.0),
+        Palette::TEXT_MUTED,
+    );
+    let dot = 6.0;
+    let gap = 6.0;
+    let pad_x = 8.0;
+    let height = 20.0;
+    let width = pad_x * 2.0 + dot + gap + galley.size().x;
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        let radius = CornerRadius::same((height / 2.0) as u8);
+        painter.rect_filled(rect, radius, Palette::SURFACE_HOVER);
+        painter.circle_filled(
+            egui::pos2(rect.min.x + pad_x + dot / 2.0, rect.center().y),
+            dot / 2.0,
+            color,
+        );
+        painter.galley(
+            egui::pos2(
+                rect.min.x + pad_x + dot + gap,
+                rect.center().y - galley.size().y / 2.0,
+            ),
+            galley,
+            Palette::TEXT_MUTED,
+        );
+    }
 }
 
 /// Renders the correct icon/text for a launch target, used in details.

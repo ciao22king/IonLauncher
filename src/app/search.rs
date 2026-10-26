@@ -5,7 +5,7 @@
 
 use crate::app::{library, IonApp};
 use crate::config::ViewMode;
-use crate::theme::Palette;
+use crate::theme::{space, text, Palette};
 use crate::widgets;
 use egui::{Key, RichText, Vec2};
 
@@ -13,13 +13,13 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("Search")
-                .size(22.0)
+                .size(text::XL)
                 .strong()
                 .color(Palette::TEXT),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let count = app.visible_ids().len();
-            let text = if app.search.trim().is_empty() {
+            let label = if app.search.trim().is_empty() {
                 format!(
                     "{} installed",
                     library::count_label(app.games.len(), "game", "games")
@@ -29,13 +29,17 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             } else {
                 format!("{count} matches")
             };
-            ui.label(RichText::new(text).size(12.0).color(Palette::TEXT_FAINT));
+            ui.label(
+                RichText::new(label)
+                    .size(text::SM)
+                    .color(Palette::TEXT_FAINT),
+            );
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(space::MD);
 
     search_field(app, ui);
-    ui.add_space(10.0);
+    ui.add_space(space::MD);
 
     if app.search.trim().is_empty() {
         recent_searches(app, ui);
@@ -56,7 +60,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
 
 fn search_field(app: &mut IonApp, ui: &mut egui::Ui) {
     let response = ui.add_sized(
-        Vec2::new(ui.available_width().min(720.0), 34.0),
+        Vec2::new(ui.available_width().min(720.0), 36.0),
         egui::TextEdit::singleline(&mut app.search)
             .hint_text("Search your games…")
             .desired_width(f32::INFINITY),
@@ -69,15 +73,15 @@ fn search_field(app: &mut IonApp, ui: &mut egui::Ui) {
     }
 
     if !app.search.is_empty() {
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         ui.horizontal(|ui| {
-            if widgets::secondary_button(ui, "✕  Clear").clicked() {
+            if widgets::secondary_button(ui, "Clear").clicked() {
                 app.search.clear();
                 app.view_cache = None;
             }
             ui.label(
                 RichText::new("Showing results from all stores")
-                    .size(11.5)
+                    .size(text::XS)
                     .color(Palette::TEXT_FAINT),
             );
         });
@@ -86,19 +90,19 @@ fn search_field(app: &mut IonApp, ui: &mut egui::Ui) {
 
 fn recent_searches(app: &mut IonApp, ui: &mut egui::Ui) {
     if app.config.recent_searches.is_empty() {
-        ui.add_space(40.0);
+        ui.add_space(space::XXL * 1.5);
         ui.vertical_centered(|ui| {
             ui.label(
                 RichText::new("Type to search all three stores at once")
-                    .size(14.0)
+                    .size(text::BASE)
                     .color(Palette::TEXT_MUTED),
             );
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             ui.label(
                 RichText::new(
                     "Matching is on the game title. Press Enter to keep a term for later.",
                 )
-                .size(12.0)
+                .size(text::SM)
                 .color(Palette::TEXT_FAINT),
             );
         });
@@ -106,11 +110,11 @@ fn recent_searches(app: &mut IonApp, ui: &mut egui::Ui) {
     }
 
     ui.label(
-        RichText::new("RECENT")
-            .size(10.5)
+        RichText::new("Recent")
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
     );
-    ui.add_space(6.0);
+    ui.add_space(space::SM);
 
     let terms = app.config.recent_searches.clone();
     let mut chosen: Option<String> = None;
@@ -122,7 +126,7 @@ fn recent_searches(app: &mut IonApp, ui: &mut egui::Ui) {
         }
     });
 
-    ui.add_space(12.0);
+    ui.add_space(space::LG);
     ui.horizontal(|ui| {
         if widgets::secondary_button(ui, "Clear history").clicked() {
             app.config.recent_searches.clear();
@@ -137,20 +141,21 @@ fn recent_searches(app: &mut IonApp, ui: &mut egui::Ui) {
 }
 
 fn no_matches(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.add_space(50.0);
+    ui.add_space(space::XXL * 1.5);
     ui.vertical_centered(|ui| {
         ui.label(
             RichText::new(format!("No game matches “{}”", app.search.trim()))
-                .size(16.0)
+                .size(text::MD)
+                .strong()
                 .color(Palette::TEXT),
         );
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         ui.label(
             RichText::new("Only installed games are searchable.")
-                .size(12.0)
+                .size(text::SM)
                 .color(Palette::TEXT_MUTED),
         );
-        ui.add_space(12.0);
+        ui.add_space(space::LG);
         if widgets::secondary_button(ui, "Clear search").clicked() {
             app.search.clear();
             app.view_cache = None;

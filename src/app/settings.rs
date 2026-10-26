@@ -3,7 +3,7 @@
 use crate::app::IonApp;
 use crate::model::Store;
 use crate::providers;
-use crate::theme::Palette;
+use crate::theme::{space, text, Palette};
 use crate::widgets;
 use egui::{RichText, ScrollArea, Vec2};
 use std::path::PathBuf;
@@ -11,17 +11,17 @@ use std::path::PathBuf;
 pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.label(
         RichText::new("Settings")
-            .size(22.0)
+            .size(text::XL)
             .strong()
             .color(Palette::TEXT),
     );
-    ui.add_space(4.0);
+    ui.add_space(space::XS);
     ui.label(
         RichText::new("IonLauncher reads each store's own files. Nothing is uploaded anywhere.")
-            .size(12.5)
+            .size(text::SM)
             .color(Palette::TEXT_MUTED),
     );
-    ui.add_space(14.0);
+    ui.add_space(space::LG);
 
     // Cards read better in a fixed column than stretched across a wide
     // window, so the form is centred and capped at a comfortable width.
@@ -36,24 +36,24 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 |ui| {
                     ui.set_width(width);
                     stores_section(app, ui);
-                    ui.add_space(12.0);
+                    ui.add_space(space::MD);
                     accounts_section(app, ui);
-                    ui.add_space(14.0);
+                    ui.add_space(space::LG);
                     library_section(app, ui);
-                    ui.add_space(14.0);
+                    ui.add_space(space::LG);
                     updates_section(app, ui);
-                    ui.add_space(14.0);
+                    ui.add_space(space::LG);
                     // Proton only exists on Linux, so the section is hidden
                     // entirely elsewhere rather than shown greyed out.
                     #[cfg(target_os = "linux")]
                     {
                         proton_section(app, ui);
-                        ui.add_space(14.0);
+                        ui.add_space(space::LG);
                     }
                     paths_section(app, ui);
-                    ui.add_space(14.0);
+                    ui.add_space(space::LG);
                     about_section(app, ui);
-                    ui.add_space(20.0);
+                    ui.add_space(space::XL);
                 },
             );
         });
@@ -63,7 +63,12 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Stores");
-        ui.add_space(8.0);
+        ui.label(
+            RichText::new("Which stores IonLauncher reads on this machine.")
+                .size(text::XS)
+                .color(Palette::TEXT_FAINT),
+        );
+        ui.add_space(space::MD);
 
         for store in Store::ALL {
             let mut enabled = app.config.enabled(store);
@@ -76,25 +81,53 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
                 .to_string();
 
             ui.horizontal(|ui| {
-                ui.painter().circle_filled(
-                    ui.cursor().min + Vec2::new(6.0, 9.0),
-                    5.0,
+                let (mark, _) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    mark,
+                    egui::CornerRadius::same(crate::theme::RADIUS_MD),
+                    if enabled {
+                        Palette::tint(store.accent(), 34)
+                    } else {
+                        Palette::SURFACE_HOVER
+                    },
+                );
+                ui.painter().text(
+                    mark.center(),
+                    egui::Align2::CENTER_CENTER,
+                    store.short(),
+                    egui::FontId::proportional(text::XS),
                     if enabled {
                         store.accent()
                     } else {
                         Palette::TEXT_FAINT
                     },
                 );
-                ui.add_space(16.0);
+                ui.add_space(space::MD);
+
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(store.name()).size(14.0).color(Palette::TEXT));
+                    ui.label(RichText::new(store.name()).size(text::BASE).strong().color(
+                        if enabled {
+                            Palette::TEXT
+                        } else {
+                            Palette::TEXT_MUTED
+                        },
+                    ));
                     let detail = if enabled {
-                        format!("{count} games · {note}")
+                        format!(
+                            "{} · {note}",
+                            crate::app::library::count_label(count, "game", "games")
+                        )
                     } else {
-                        "disabled".to_string()
+                        "Disabled".to_string()
                     };
-                    ui.label(RichText::new(detail).size(11.5).color(Palette::TEXT_FAINT));
+                    ui.add_space(space::XS);
+                    ui.label(
+                        RichText::new(detail)
+                            .size(text::XS)
+                            .color(Palette::TEXT_FAINT),
+                    );
                 });
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.checkbox(&mut enabled, "").changed() {
                         app.config.set_enabled(store, enabled);
@@ -106,7 +139,7 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-            ui.add_space(6.0);
+            ui.add_space(space::MD);
         }
     });
 }
@@ -114,85 +147,193 @@ fn stores_section(app: &mut IonApp, ui: &mut egui::Ui) {
 /// Storefront access: buy a title, or install it without the store client.
 ///
 /// IonLauncher only reads what is already installed, so this section covers
-/// the two things a launcher cannot do by reading disk: reaching a store page
-/// and downloading a title when the official client is not wanted.
+/// the things a launcher cannot do by reading disk: reaching a store page,
+/// fetching the downloader, and signing it in.
+///
+/// An action a row asks for, collected while the card is drawn and applied
+/// afterwards, so the UI never holds a borrow of the app across a click.
+enum StoreAction {
+    Download(Store),
+    OpenSignIn(Store),
+    FinishSignIn(Store),
+    OpenPage(Store),
+}
+
 fn accounts_section(app: &mut IonApp, ui: &mut egui::Ui) {
+    let mut action: Option<StoreAction> = None;
+
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Stores & accounts");
-        ui.add_space(4.0);
         ui.label(
             RichText::new(
                 "Open a store page to buy or browse. Installing without the store client \
-                 uses a community downloader, which signs in once and keeps the session.",
+                 uses a community downloader. Signing in happens on the store's own page: \
+                 IonLauncher never sees your password.",
             )
-            .size(11.5)
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
         );
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
 
         for store in Store::ALL {
             let installer = crate::stores::installer(store);
-            let found = installer.find();
+            let exe = installer.executable();
             let signed_in = installer.signed_in();
+            let downloading = app
+                .downloader_download
+                .as_ref()
+                .is_some_and(|(s, _)| *s == store);
+            let signing_in = app.signing_in == Some(store);
 
             ui.horizontal(|ui| {
-                ui.painter().circle_filled(
-                    ui.cursor().min + Vec2::new(6.0, 9.0),
-                    5.0,
+                // A leading store mark, tinted with the brand colour.
+                let (mark, _) = ui.allocate_exact_size(Vec2::new(34.0, 34.0), egui::Sense::hover());
+                ui.painter().rect_filled(
+                    mark,
+                    egui::CornerRadius::same(crate::theme::RADIUS_MD),
+                    Palette::tint(store.accent(), 34),
+                );
+                ui.painter().text(
+                    mark.center(),
+                    egui::Align2::CENTER_CENTER,
+                    store.short(),
+                    egui::FontId::proportional(text::XS),
                     store.accent(),
                 );
-                ui.add_space(16.0);
+                ui.add_space(space::MD);
+
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(store.name()).size(14.0).color(Palette::TEXT));
-                    let detail = match (&found, signed_in) {
-                        (Some(_), Some(true)) => {
-                            format!("{} ready · signed in", installer.program)
+                    ui.label(
+                        RichText::new(store.name())
+                            .size(text::BASE)
+                            .strong()
+                            .color(Palette::TEXT),
+                    );
+                    ui.add_space(space::XS);
+                    let detail = if downloading {
+                        "Downloading…".to_string()
+                    } else if signing_in {
+                        "Signing in…".to_string()
+                    } else {
+                        match (&exe, signed_in) {
+                            (Some(_), Some(true)) => format!("{} · signed in", installer.program),
+                            (Some(_), Some(false)) => {
+                                format!("{} · not signed in", installer.program)
+                            }
+                            (Some(_), None) => format!("{} ready", installer.program),
+                            (None, _) => format!("{} not installed", installer.program),
                         }
-                        (Some(_), Some(false)) => {
-                            format!(
-                                "{} found · sign in with: {}",
-                                installer.program, installer.sign_in
-                            )
-                        }
-                        (Some(_), None) => format!("{} found", installer.program),
-                        (None, _) => format!("{} not installed", installer.program),
                     };
-                    ui.label(RichText::new(detail).size(11.5).color(Palette::TEXT_FAINT));
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if found.is_none()
-                        && ui
-                            .button("Get it")
-                            .on_hover_text(installer.homepage)
-                            .clicked()
-                    {
-                        match crate::util::open_url(installer.homepage) {
-                            Ok(()) => app.notify("Opening the downloader's page"),
-                            Err(e) => app.notify_error(&format!("Could not open: {e}")),
+                    let dot = if downloading || signing_in {
+                        Palette::INFO
+                    } else {
+                        match (&exe, signed_in) {
+                            (Some(_), Some(true)) => Palette::OK,
+                            (Some(_), Some(false)) => Palette::WARNING,
+                            (Some(_), None) => Palette::TEXT_FAINT,
+                            (None, _) => Palette::TEXT_FAINT,
                         }
+                    };
+                    widgets::status_pill(ui, &detail, dot);
+                });
+
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if exe.is_some() {
+                        // With the downloader present the only action left is
+                        // signing in, and only while it is not signed in yet.
+                        if signed_in == Some(false) && ui.button("Sign in").clicked() {
+                            action = Some(StoreAction::OpenSignIn(store));
+                        }
+                    } else if installer.downloadable() {
+                        if widgets::secondary_button(ui, "Download").clicked() {
+                            action = Some(StoreAction::Download(store));
+                        }
+                    } else if widgets::secondary_button(ui, "Get it").clicked() {
+                        action = Some(StoreAction::OpenPage(store));
                     }
                 });
             });
-            ui.add_space(6.0);
+
+            // The sign-in is a two-step exchange: the store's page returns a
+            // code, which the downloader trades for a session. The field only
+            // appears once the downloader is there to receive it.
+            if exe.is_some() && signed_in == Some(false) && !signing_in {
+                ui.add_space(space::SM);
+                ui.horizontal(|ui| {
+                    ui.add_space(46.0);
+                    let mut code = app.auth_code.get(&store).cloned().unwrap_or_default();
+                    let field = ui.add(
+                        egui::TextEdit::singleline(&mut code)
+                            .hint_text("Paste the code from the sign-in page")
+                            .desired_width(320.0),
+                    );
+                    let has_code = !code.trim().is_empty();
+                    if field.changed() {
+                        app.auth_code.insert(store, code);
+                    }
+                    if ui
+                        .add_enabled(has_code, egui::Button::new("Finish"))
+                        .clicked()
+                    {
+                        action = Some(StoreAction::FinishSignIn(store));
+                    }
+                });
+            }
+
+            if downloading {
+                if let Some((_, progress)) = &app.downloader_download {
+                    ui.add_space(space::SM);
+                    ui.horizontal(|ui| {
+                        ui.add_space(46.0);
+                        let fraction = progress.fraction();
+                        let text = if progress.total.load(std::sync::atomic::Ordering::Relaxed) == 0
+                        {
+                            "starting…".to_string()
+                        } else {
+                            format!("{:.0}%", fraction * 100.0)
+                        };
+                        ui.add(
+                            egui::ProgressBar::new(fraction)
+                                .desired_width((ui.available_width() - space::MD).max(120.0))
+                                .text(text),
+                        );
+                    });
+                }
+            }
+
+            ui.add_space(space::MD);
         }
 
         // Installing a title is a per-game action, so the button lives in the
         // details panel; this list is only about what is available.
-        ui.add_space(4.0);
         ui.label(
             RichText::new("Open a game's details to install it without its store client.")
-                .size(11.0)
+                .size(text::XS)
                 .color(Palette::TEXT_FAINT),
         );
     });
+
+    match action {
+        Some(StoreAction::Download(store)) => app.download_downloader(store),
+        Some(StoreAction::OpenSignIn(store)) => app.open_sign_in_page(store),
+        Some(StoreAction::FinishSignIn(store)) => app.complete_sign_in(store),
+        Some(StoreAction::OpenPage(store)) => {
+            let installer = crate::stores::installer(store);
+            match crate::util::open_url(installer.homepage) {
+                Ok(()) => app.notify("Opening the downloader's page"),
+                Err(e) => app.notify_error(&format!("Could not open: {e}")),
+            }
+        }
+        None => {}
+    }
 }
 
 fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Library");
-        ui.add_space(8.0);
+        ui.add_space(space::SM);
 
         let mut show_missing = app.config.show_missing;
         if ui
@@ -207,7 +348,7 @@ fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
             app.view_cache = None;
         }
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         let mut fetch_art = app.config.fetch_artwork;
         if ui
             .checkbox(
@@ -225,15 +366,15 @@ fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
         }
         ui.label(
             RichText::new("Artwork is cached on disk, so covers appear instantly next time.")
-                .size(11.0)
+                .size(text::XS)
                 .color(Palette::TEXT_FAINT),
         );
 
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
         let mut card_width = app.config.card_width;
         ui.label(
             RichText::new("Card size")
-                .size(12.0)
+                .size(text::SM)
                 .color(Palette::TEXT_MUTED),
         );
         if ui
@@ -244,7 +385,7 @@ fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
             app.config_dirty = true;
         }
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         let mut demo = app.config.demo_mode;
         if ui
             .checkbox(&mut demo, "Demo library (sample games, no scanning)")
@@ -256,11 +397,11 @@ fn library_section(app: &mut IonApp, ui: &mut egui::Ui) {
         }
 
         if !app.config.favorites.is_empty() {
-            ui.add_space(10.0);
+            ui.add_space(space::MD);
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(format!("{} favourites saved", app.config.favorites.len()))
-                        .size(11.5)
+                        .size(text::XS)
                         .color(Palette::TEXT_FAINT),
                 );
                 if widgets::secondary_button(ui, "Clear").clicked() {
@@ -277,15 +418,15 @@ fn paths_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Manual locations");
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         ui.label(
             RichText::new(
                 "Only needed when a store lives somewhere unusual. Leave blank for automatic detection.",
             )
-            .size(11.5)
+            .size(text::XS)
             .color(Palette::TEXT_MUTED),
         );
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
 
         for store in Store::ALL {
             let mut text = app
@@ -296,7 +437,7 @@ fn paths_section(app: &mut IonApp, ui: &mut egui::Ui) {
 
             ui.label(
                 RichText::new(store.name())
-                    .size(12.0)
+                    .size(text::SM)
                     .color(Palette::TEXT_MUTED),
             );
             ui.horizontal(|ui| {
@@ -327,10 +468,10 @@ fn paths_section(app: &mut IonApp, ui: &mut egui::Ui) {
                     }
                 }
             });
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
         }
 
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         if widgets::secondary_button(ui, "Rescan now").clicked() {
             app.rescan();
         }
@@ -347,16 +488,16 @@ fn proton_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Proton (Linux)");
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         ui.label(
             RichText::new(
                 "Proton runs Windows games on Linux. Pick a build here and Windows titles \
                  launch through it, each with its own prefix.",
             )
-            .size(11.5)
+            .size(text::XS)
             .color(Palette::TEXT_MUTED),
         );
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
 
         // Master switch. Without a build installed there is nothing to switch
         // to, so the checkbox explains that instead of silently doing nothing.
@@ -374,15 +515,15 @@ fn proton_section(app: &mut IonApp, ui: &mut egui::Ui) {
         if !has_builds {
             ui.label(
                 RichText::new("No Proton build found yet — download one below.")
-                    .size(11.0)
+                    .size(text::XS)
                     .color(Palette::TEXT_FAINT),
             );
         }
 
-        ui.add_space(12.0);
+        ui.add_space(space::MD);
         installed_proton_list(app, ui);
 
-        ui.add_space(12.0);
+        ui.add_space(space::MD);
         proton_download_list(app, ui);
     });
 }
@@ -393,7 +534,7 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new(format!("Installed ({})", app.proton_installed.len()))
-                .size(12.5)
+                .size(text::SM)
                 .color(Palette::TEXT_MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -402,7 +543,7 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
             }
         });
     });
-    ui.add_space(6.0);
+    ui.add_space(space::SM);
 
     if app.proton_installed.is_empty() {
         ui.label(
@@ -410,7 +551,7 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
                 "Nothing installed. Steam's own builds and community builds in \
                  compatibilitytools.d are both detected.",
             )
-            .size(11.0)
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
         );
         return;
@@ -440,9 +581,13 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
 
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&build.name).size(13.0).color(Palette::TEXT));
+                    ui.label(
+                        RichText::new(&build.name)
+                            .size(text::SM)
+                            .color(Palette::TEXT),
+                    );
                     if is_active {
-                        ui.label(RichText::new("in use").size(10.5).color(Palette::OK));
+                        ui.label(RichText::new("in use").size(text::XS).color(Palette::OK));
                     }
                 });
                 ui.label(
@@ -451,7 +596,7 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
                         build.origin.label(),
                         build.path.display()
                     ))
-                    .size(10.5)
+                    .size(text::XS)
                     .color(Palette::TEXT_FAINT),
                 );
             });
@@ -480,7 +625,7 @@ fn installed_proton_list(app: &mut IonApp, ui: &mut egui::Ui) {
             }
         }
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
     }
 }
 
@@ -490,7 +635,7 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("Download builds")
-                .size(12.5)
+                .size(text::SM)
                 .color(Palette::TEXT_MUTED),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -500,23 +645,23 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
             }
         });
     });
-    ui.add_space(4.0);
+    ui.add_space(space::XS);
     ui.label(
         RichText::new("Community builds from GloriousEggroll/proton-ge-custom.")
-            .size(10.5)
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
     );
-    ui.add_space(8.0);
+    ui.add_space(space::SM);
 
     // Progress of an in-flight install takes over the section: while a build
     // is downloading, starting a second one would be confusing and wasteful.
     if let Some((tag, progress)) = &app.proton_download {
         ui.label(
             RichText::new(format!("Installing {tag}…"))
-                .size(12.0)
+                .size(text::SM)
                 .color(Palette::TEXT),
         );
-        ui.add_space(4.0);
+        ui.add_space(space::XS);
         let fraction = progress.fraction();
         let text = if progress.total.load(std::sync::atomic::Ordering::Relaxed) == 0 {
             "starting…".to_string()
@@ -528,12 +673,12 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
                 .desired_width(ui.available_width())
                 .text(text),
         );
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         ui.label(
             RichText::new(
                 "A build is a few hundred megabytes; the download runs in the background.",
             )
-            .size(10.5)
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
         );
         return;
@@ -549,7 +694,7 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
             ui.spinner();
             ui.label(
                 RichText::new("Loading the list…")
-                    .size(11.5)
+                    .size(text::XS)
                     .color(Palette::TEXT_MUTED),
             );
         });
@@ -559,7 +704,7 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
     if let Some(err) = &app.proton_releases_error {
         ui.label(
             RichText::new(format!("Could not load the list: {err}"))
-                .size(11.0)
+                .size(text::XS)
                 .color(Palette::DANGER),
         );
         return;
@@ -581,18 +726,26 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
-                ui.label(RichText::new(&release.tag).size(12.5).color(Palette::TEXT));
+                ui.label(
+                    RichText::new(&release.tag)
+                        .size(text::SM)
+                        .color(Palette::TEXT),
+                );
                 let detail = if release.published.is_empty() {
                     release.size_label()
                 } else {
                     format!("{} · {}", release.published, release.size_label())
                 };
-                ui.label(RichText::new(detail).size(10.5).color(Palette::TEXT_FAINT));
+                ui.label(
+                    RichText::new(detail)
+                        .size(text::XS)
+                        .color(Palette::TEXT_FAINT),
+                );
             });
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if already {
-                    ui.label(RichText::new("installed").size(11.0).color(Palette::OK));
+                    ui.label(RichText::new("installed").size(text::XS).color(Palette::OK));
                 } else if widgets::secondary_button(ui, "Download").clicked() {
                     start = true;
                 }
@@ -605,7 +758,7 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
             crate::proton::download_release(release, progress);
         }
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
     }
 }
 
@@ -614,12 +767,12 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "Updates");
-        ui.add_space(8.0);
+        ui.add_space(space::SM);
 
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!("IonLauncher {}", crate::update::current_version()))
-                    .size(12.5)
+                    .size(text::SM)
                     .color(Palette::TEXT),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -627,7 +780,7 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
                     ui.spinner();
                     ui.label(
                         RichText::new("Checking…")
-                            .size(11.5)
+                            .size(text::XS)
                             .color(Palette::TEXT_MUTED),
                     );
                 } else if widgets::secondary_button(ui, "Check now").clicked() {
@@ -636,7 +789,7 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
             });
         });
 
-        ui.add_space(6.0);
+        ui.add_space(space::SM);
         let mut enabled = app.config.check_updates;
         if ui
             .checkbox(&mut enabled, "Check for updates on startup")
@@ -650,14 +803,14 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
                 "One request to the public GitHub releases page. Nothing else is sent, and \
                  downloading an update never installs it without asking.",
             )
-            .size(10.5)
+            .size(text::XS)
             .color(Palette::TEXT_FAINT),
         );
 
         // An in-flight download owns the card: showing the banner underneath
         // would invite a second click on a download already running.
         if let Some(progress) = app.update_download.clone() {
-            ui.add_space(10.0);
+            ui.add_space(space::MD);
             let fraction = progress.fraction();
             let text = if progress.total.load(std::sync::atomic::Ordering::Relaxed) == 0 {
                 "starting…".to_string()
@@ -666,10 +819,10 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
             };
             ui.label(
                 RichText::new("Downloading the update…")
-                    .size(12.0)
+                    .size(text::SM)
                     .color(Palette::TEXT),
             );
-            ui.add_space(4.0);
+            ui.add_space(space::XS);
             ui.add(
                 egui::ProgressBar::new(fraction)
                     .desired_width(ui.available_width())
@@ -681,16 +834,20 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
         // Downloaded and waiting: the file is in the download folder, and the
         // last step is the user's to take.
         if let Some(path) = app.update_ready.clone() {
-            ui.add_space(10.0);
+            ui.add_space(space::MD);
             ui.label(
                 RichText::new("Ready to install")
-                    .size(12.5)
+                    .size(text::SM)
                     .strong()
                     .color(Palette::OK),
             );
-            ui.add_space(2.0);
-            ui.label(RichText::new(&path).size(10.5).color(Palette::TEXT_FAINT));
-            ui.add_space(6.0);
+            ui.add_space(space::XS);
+            ui.label(
+                RichText::new(&path)
+                    .size(text::XS)
+                    .color(Palette::TEXT_FAINT),
+            );
+            ui.add_space(space::SM);
             ui.horizontal(|ui| {
                 if widgets::secondary_button(ui, "Run installer").clicked() {
                     match crate::update::run_installer(&path) {
@@ -709,41 +866,41 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
 
         let Some(update) = app.update_available.clone() else {
             if app.update_error.is_some() {
-                ui.add_space(8.0);
+                ui.add_space(space::SM);
                 ui.label(
                     RichText::new("The last check could not reach GitHub.")
-                        .size(11.0)
+                        .size(text::XS)
                         .color(Palette::TEXT_MUTED),
                 );
             } else if app.update_checked && !app.update_checking {
-                ui.add_space(8.0);
+                ui.add_space(space::SM);
                 ui.label(
                     RichText::new("You are on the latest version.")
-                        .size(11.0)
+                        .size(text::XS)
                         .color(Palette::TEXT_MUTED),
                 );
             }
             return;
         };
 
-        ui.add_space(10.0);
+        ui.add_space(space::MD);
         ui.label(
             RichText::new(format!("Version {} is available", update.version))
-                .size(12.5)
+                .size(text::SM)
                 .strong()
                 .color(Palette::ACCENT),
         );
         if update.size_bytes > 0 {
-            ui.add_space(2.0);
+            ui.add_space(space::XS);
             ui.label(
                 RichText::new(format!("Download size: {}", update.size_label()))
-                    .size(10.5)
+                    .size(text::XS)
                     .color(Palette::TEXT_FAINT),
             );
         }
 
         if !update.notes.trim().is_empty() {
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             // Release notes can be long; cap the height so the card cannot
             // push the rest of the settings off-screen.
             egui::ScrollArea::vertical()
@@ -752,13 +909,13 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
                 .show(ui, |ui| {
                     ui.label(
                         RichText::new(update.notes.trim())
-                            .size(11.0)
+                            .size(text::XS)
                             .color(Palette::TEXT_MUTED),
                     );
                 });
         }
 
-        ui.add_space(8.0);
+        ui.add_space(space::SM);
         ui.horizontal(|ui| {
             if update.asset_url.is_some() {
                 if widgets::secondary_button(ui, "Download update").clicked() {
@@ -771,7 +928,7 @@ fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
                 }
                 ui.label(
                     RichText::new("No installer for this platform yet.")
-                        .size(10.5)
+                        .size(text::XS)
                         .color(Palette::TEXT_FAINT),
                 );
             }
@@ -789,37 +946,55 @@ fn about_section(app: &mut IonApp, ui: &mut egui::Ui) {
     crate::ui::card_frame().show(ui, |ui| {
         ui.set_width(ui.available_width());
         widgets::section_heading(ui, "About");
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new(format!("IonLauncher {}", env!("CARGO_PKG_VERSION")))
-                .size(13.0)
-                .color(Palette::TEXT),
-        );
-        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let (mark, _) = ui.allocate_exact_size(Vec2::new(40.0, 40.0), egui::Sense::hover());
+            ui.painter().rect_filled(
+                mark,
+                egui::CornerRadius::same(crate::theme::RADIUS_MD),
+                Palette::accent_subtle(),
+            );
+            ui.painter().text(
+                mark.center(),
+                egui::Align2::CENTER_CENTER,
+                "⚡",
+                egui::FontId::proportional(20.0),
+                Palette::ACCENT,
+            );
+            ui.add_space(space::MD);
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new(format!("IonLauncher {}", env!("CARGO_PKG_VERSION")))
+                        .size(text::BASE)
+                        .strong()
+                        .color(Palette::TEXT),
+                );
+                ui.label(
+                    RichText::new("GPL-2.0-or-later")
+                        .size(text::XS)
+                        .color(Palette::TEXT_FAINT),
+                );
+            });
+        });
+        ui.add_space(space::MD);
         ui.label(
             RichText::new(
                 "A single, fast launcher for Steam, Epic Games and GOG. Written in Rust with an \
                  immediate-mode GPU interface, so it starts instantly and stays responsive on \
                  older machines.",
             )
-            .size(11.5)
+            .size(text::XS)
             .color(Palette::TEXT_MUTED),
         );
-        ui.add_space(8.0);
-        ui.label(
-            RichText::new("GPL-2.0-or-later")
-                .size(11.0)
-                .color(Palette::TEXT_FAINT),
-        );
-        ui.add_space(6.0);
+        ui.add_space(space::MD);
         if let Some(dir) = crate::art::art_cache_dir() {
             ui.label(
                 RichText::new(format!("Artwork cache: {}", dir.display()))
-                    .size(10.5)
+                    .size(text::XS)
+                    .monospace()
                     .color(Palette::TEXT_FAINT),
             );
         }
-        ui.add_space(6.0);
+        ui.add_space(space::MD);
         ui.horizontal(|ui| {
             if widgets::secondary_button(ui, "Clear artwork cache").clicked() {
                 app.art.clear_disk_cache();

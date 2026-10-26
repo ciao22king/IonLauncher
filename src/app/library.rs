@@ -6,16 +6,16 @@
 
 use crate::app::IonApp;
 use crate::config::ViewMode;
-use crate::theme::{Palette, RADIUS_CARD};
+use crate::theme::{space, text, Palette, RADIUS_LG};
 use crate::widgets::{self, elided_job, CardAction};
 use egui::{CornerRadius, Rect, RichText, ScrollArea, Sense, Stroke, StrokeKind, Vec2};
 
 /// Space between cards.
-const GAP: f32 = 14.0;
+const GAP: f32 = 16.0;
 
 pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     header(app, ui);
-    ui.add_space(12.0);
+    ui.add_space(space::MD);
 
     if app.games.is_empty() && !app.scanning {
         empty_state(app, ui);
@@ -37,43 +37,51 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
 
 /// Title plus the current filter, so the user knows what they are looking at.
 fn header(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        let title = if app.favorites_only {
-            "Favourites"
-        } else {
-            "Installed games"
-        };
-        ui.label(
-            RichText::new(title)
-                .size(22.0)
-                .strong()
-                .color(Palette::TEXT),
-        );
-        ui.add_space(8.0);
+    let title = if app.favorites_only {
+        "Favourites"
+    } else {
+        "Installed games"
+    };
+    ui.label(
+        RichText::new(title)
+            .size(text::XL)
+            .strong()
+            .color(Palette::TEXT),
+    );
+    ui.add_space(space::XS);
 
+    ui.horizontal(|ui| {
         // A search set on the Search page still filters here, so say so and
         // give a way out without leaving the page.
         if !app.search.trim().is_empty() {
             ui.label(
-                RichText::new(format!("matching “{}”", app.search.trim()))
-                    .size(12.0)
+                RichText::new(format!("Matching “{}”", app.search.trim()))
+                    .size(text::SM)
                     .color(Palette::TEXT_MUTED),
             );
-            if ui.small_button("✕").on_hover_text("Clear search").clicked() {
+            if ui
+                .small_button("Clear")
+                .on_hover_text("Clear search")
+                .clicked()
+            {
                 app.search.clear();
                 app.view_cache = None;
             }
         } else {
             let visible = app.visible_ids().len();
             let total = app.games.len();
-            let text = if app.favorites_only {
+            let label = if app.favorites_only {
                 count_label(visible, "favourite", "favourites")
             } else if visible == total {
                 format!("{} from all stores", count_label(total, "game", "games"))
             } else {
-                format!("{visible} of {total}")
+                format!("{visible} of {total} games")
             };
-            ui.label(RichText::new(text).size(12.0).color(Palette::TEXT_FAINT));
+            ui.label(
+                RichText::new(label)
+                    .size(text::SM)
+                    .color(Palette::TEXT_FAINT),
+            );
         }
     });
 }
@@ -90,8 +98,9 @@ pub fn count_label(n: usize, singular: &str, plural: &str) -> String {
 /// Shared by the library and the search page so both render identically.
 pub fn grid(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
     let card_width = app.config.card_width.clamp(150.0, 340.0);
-    // Portrait covers are 3:4, plus room for the title block.
-    let card_height = card_width * 4.0 / 3.0 + 46.0;
+    // Portrait covers are 3:4, with the title overlaid on a scrim at the base,
+    // so the card is a touch taller than the cover alone.
+    let card_height = card_width * 4.0 / 3.0;
     let card_size = Vec2::new(card_width, card_height);
 
     ScrollArea::vertical()
@@ -157,7 +166,7 @@ pub fn list(app: &mut IonApp, ui: &mut egui::Ui, ids: &[String], salt: &str) {
         .show(ui, |ui| {
             for id in ids {
                 draw_row(app, ui, id);
-                ui.add_space(6.0);
+                ui.add_space(space::SM);
             }
         });
 }
@@ -184,51 +193,61 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
     };
     let favorite = app.config.is_favorite(id);
 
-    let height = 68.0;
+    let height = 72.0;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), height), Sense::click());
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        let fill = if response.hovered() {
+        let hovered = response.hovered();
+        let fill = if hovered {
             Palette::CARD_HOVER
         } else {
             Palette::CARD
         };
-        painter.rect_filled(rect, CornerRadius::same(RADIUS_CARD), fill);
+        painter.rect_filled(rect, CornerRadius::same(RADIUS_LG), fill);
 
-        // Thumbnail: a fixed square showing the cover, cropped to fit.
+        // Thumbnail: a fixed portrait crop of the cover.
         let thumb = Rect::from_min_size(
-            rect.min + Vec2::new(8.0, 8.0),
-            Vec2::new((height - 16.0) * 0.75, height - 16.0),
+            rect.min + Vec2::new(space::MD, space::MD),
+            Vec2::new((height - space::MD * 2.0) * 0.72, height - space::MD * 2.0),
         );
         match &game.art {
-            Some(texture) => {
-                widgets::paint_cover(ui, thumb, texture, 6, fill, widgets::Corners::ALL)
-            }
+            Some(texture) => widgets::paint_cover(
+                ui,
+                thumb,
+                texture,
+                crate::theme::RADIUS_SM,
+                fill,
+                widgets::Corners::ALL,
+            ),
             None => {
-                painter.rect_filled(thumb, CornerRadius::same(6), Palette::SURFACE_HOVER);
+                painter.rect_filled(
+                    thumb,
+                    CornerRadius::same(crate::theme::RADIUS_SM),
+                    Palette::SURFACE_HOVER,
+                );
                 painter.text(
                     thumb.center(),
                     egui::Align2::CENTER_CENTER,
                     game.store.short(),
-                    egui::FontId::proportional(11.0),
+                    egui::FontId::proportional(text::XS),
                     game.store.accent(),
                 );
             }
         }
 
-        let text_x = thumb.max.x + 12.0;
-        let text_width = (rect.max.x - 44.0 - text_x).max(20.0);
+        let text_x = thumb.max.x + space::MD;
+        let text_width = (rect.max.x - 52.0 - text_x).max(20.0);
         let title_galley = painter.layout_job(elided_job(
             &game.title,
-            egui::FontId::proportional(14.5),
+            egui::FontId::proportional(text::BASE),
             Palette::TEXT,
             text_width,
             1,
         ));
         painter.galley(
-            egui::pos2(text_x, rect.center().y - 9.0 - title_galley.size().y / 2.0),
+            egui::pos2(text_x, rect.center().y - 10.0 - title_galley.size().y / 2.0),
             title_galley,
             Palette::TEXT,
         );
@@ -251,44 +270,51 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
         }
         let meta_galley = painter.layout_job(elided_job(
             &meta.join("  ·  "),
-            egui::FontId::proportional(11.5),
+            egui::FontId::proportional(text::XS),
             Palette::TEXT_MUTED,
             text_width,
             1,
         ));
         painter.galley(
-            egui::pos2(text_x, rect.center().y + 11.0 - meta_galley.size().y / 2.0),
+            egui::pos2(text_x, rect.center().y + 10.0 - meta_galley.size().y / 2.0),
             meta_galley,
             Palette::TEXT_MUTED,
         );
 
-        // Right-hand affordances.
+        // Right-hand affordances: a favourite star, then a launch button that
+        // lights up on hover.
         if favorite {
             painter.text(
-                egui::pos2(rect.max.x - 16.0, rect.center().y),
+                egui::pos2(rect.max.x - 18.0, rect.center().y),
                 egui::Align2::CENTER_CENTER,
                 "★",
                 egui::FontId::proportional(14.0),
-                egui::Color32::from_rgb(0xF5, 0xC2, 0x42),
+                Palette::WARNING,
             );
         }
-        painter.text(
-            egui::pos2(rect.max.x - 44.0, rect.center().y),
-            egui::Align2::CENTER_CENTER,
-            "▶",
-            egui::FontId::proportional(13.0),
-            if response.hovered() {
-                Palette::ACCENT
-            } else {
-                Palette::TEXT_FAINT
-            },
-        );
+        let play_center = egui::pos2(rect.max.x - 48.0, rect.center().y);
+        let play_color = if hovered {
+            Palette::ACCENT
+        } else {
+            Palette::TEXT_FAINT
+        };
+        painter.circle_stroke(play_center, 14.0, Stroke::new(1.5, play_color));
+        let s = 5.0;
+        painter.add(egui::Shape::convex_polygon(
+            vec![
+                egui::pos2(play_center.x - s * 0.5 + 1.0, play_center.y - s),
+                egui::pos2(play_center.x - s * 0.5 + 1.0, play_center.y + s),
+                egui::pos2(play_center.x + s * 0.8 + 1.0, play_center.y),
+            ],
+            play_color,
+            Stroke::NONE,
+        ));
 
-        if response.hovered() {
+        if hovered {
             painter.rect_stroke(
                 rect,
-                CornerRadius::same(RADIUS_CARD),
-                Stroke::new(1.0, Palette::ACCENT_DIM),
+                CornerRadius::same(RADIUS_LG),
+                Stroke::new(1.0, Palette::BORDER_STRONG),
                 StrokeKind::Inside,
             );
         }
@@ -302,16 +328,16 @@ fn draw_row(app: &mut IonApp, ui: &mut egui::Ui, id: &str) {
         action = CardAction::Launch;
     }
     response.context_menu(|ui| {
-        if ui.button("▶  Launch").clicked() {
+        if ui.button("Launch").clicked() {
             action = CardAction::Launch;
             ui.close();
         }
-        if ui.button("★  Toggle favourite").clicked() {
+        if ui.button("Toggle favourite").clicked() {
             action = CardAction::ToggleFavorite;
             ui.close();
         }
         ui.separator();
-        if ui.button("🛒  Open store page").clicked() {
+        if ui.button("Open store page").clicked() {
             action = CardAction::StorePage;
             ui.close();
         }
@@ -335,39 +361,52 @@ fn apply(app: &mut IonApp, id: &str, action: CardAction) {
 
 /// Shown when the stores reported nothing at all.
 fn empty_state(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.add_space(60.0);
+    ui.add_space(space::XXL * 2.0);
     ui.vertical_centered(|ui| {
+        let (rect, _) = ui.allocate_exact_size(Vec2::new(48.0, 48.0), Sense::hover());
+        ui.painter()
+            .circle_filled(rect.center(), 24.0, Palette::SURFACE_HOVER);
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "▤",
+            egui::FontId::proportional(20.0),
+            Palette::TEXT_FAINT,
+        );
+        ui.add_space(space::MD);
         ui.label(
             RichText::new("No games found")
-                .size(19.0)
+                .size(text::MD)
+                .strong()
                 .color(Palette::TEXT),
         );
-        ui.add_space(8.0);
+        ui.add_space(space::XS);
         ui.label(
             RichText::new(
                 "IonLauncher lists what is installed by Steam, Epic Games and GOG on this machine.",
             )
-            .size(13.0)
+            .size(text::SM)
             .color(Palette::TEXT_MUTED),
         );
-        ui.add_space(4.0);
         if let Some(report) = &app.last_report {
+            ui.add_space(space::XS);
             for (store, note) in &report.notes {
                 ui.label(
                     RichText::new(format!("{}: {note}", store.name()))
-                        .size(12.0)
+                        .size(text::XS)
                         .color(Palette::TEXT_FAINT),
                 );
             }
         }
-        ui.add_space(16.0);
+        ui.add_space(space::LG);
         ui.horizontal(|ui| {
-            ui.add_space(ui.available_width() / 2.0 - 130.0);
+            ui.add_space(ui.available_width() / 2.0 - 150.0);
             if widgets::primary_button(ui, "Try the demo library", 180.0).clicked() {
                 app.config.demo_mode = true;
                 app.config_dirty = true;
                 app.rescan();
             }
+            ui.add_space(space::SM);
             if widgets::secondary_button(ui, "Open Settings").clicked() {
                 app.screen = crate::app::Screen::Settings;
             }
@@ -377,7 +416,7 @@ fn empty_state(app: &mut IonApp, ui: &mut egui::Ui) {
 
 /// Shown when the search or the favourites filter excludes everything.
 fn no_results(app: &mut IonApp, ui: &mut egui::Ui) {
-    ui.add_space(60.0);
+    ui.add_space(space::XXL * 2.0);
     ui.vertical_centered(|ui| {
         let (title, hint) = if app.favorites_only {
             (
@@ -390,10 +429,19 @@ fn no_results(app: &mut IonApp, ui: &mut egui::Ui) {
                 "Try a shorter word, or clear the search to see everything.",
             )
         };
-        ui.label(RichText::new(title).size(17.0).color(Palette::TEXT));
-        ui.add_space(6.0);
-        ui.label(RichText::new(hint).size(12.5).color(Palette::TEXT_MUTED));
-        ui.add_space(10.0);
+        ui.label(
+            RichText::new(title)
+                .size(text::MD)
+                .strong()
+                .color(Palette::TEXT),
+        );
+        ui.add_space(space::XS);
+        ui.label(
+            RichText::new(hint)
+                .size(text::SM)
+                .color(Palette::TEXT_MUTED),
+        );
+        ui.add_space(space::LG);
 
         let label = if app.favorites_only {
             "Show all games"

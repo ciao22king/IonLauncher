@@ -5,7 +5,7 @@
 //! title, plus the two actions that matter.
 
 use crate::app::IonApp;
-use crate::theme::{Palette, RADIUS_CARD};
+use crate::theme::{space, text, Palette, RADIUS_LG};
 use crate::widgets;
 use egui::{CornerRadius, RichText, Vec2};
 
@@ -31,7 +31,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         ui.label(
             RichText::new("Details")
-                .size(15.0)
+                .size(text::MD)
                 .strong()
                 .color(Palette::TEXT),
         );
@@ -41,7 +41,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             }
         });
     });
-    ui.add_space(10.0);
+    ui.add_space(space::MD);
 
     egui::ScrollArea::vertical()
         .id_salt("details-scroll")
@@ -58,7 +58,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                         ui,
                         rect,
                         texture,
-                        RADIUS_CARD,
+                        RADIUS_LG,
                         Palette::SURFACE,
                         widgets::Corners::ALL,
                     );
@@ -66,46 +66,45 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 None => {
                     ui.painter().rect_filled(
                         rect,
-                        CornerRadius::same(RADIUS_CARD),
+                        CornerRadius::same(RADIUS_LG),
                         Palette::SURFACE_HOVER,
                     );
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
                         game.store.name(),
-                        egui::FontId::proportional(14.0),
+                        egui::FontId::proportional(text::BASE),
                         game.store.accent(),
                     );
                 }
             }
 
-            ui.add_space(14.0);
+            ui.add_space(space::LG);
             ui.label(
                 RichText::new(&game.title)
-                    .size(19.0)
+                    .size(text::LG)
                     .strong()
                     .color(Palette::TEXT),
             );
-            ui.add_space(4.0);
+            ui.add_space(space::SM);
             ui.horizontal(|ui| {
-                let (dot, _) = ui.allocate_exact_size(Vec2::new(10.0, 10.0), egui::Sense::hover());
-                ui.painter()
-                    .circle_filled(dot.center(), 4.0, game.store.accent());
-                ui.label(
-                    RichText::new(game.store.name())
-                        .size(12.5)
-                        .color(Palette::TEXT_MUTED),
-                );
+                widgets::status_pill(ui, game.store.name(), game.store.accent());
+                if app.config.is_favorite(&id) {
+                    widgets::status_pill(ui, "Favourite", Palette::WARNING);
+                }
+                if !game.install_dir.as_os_str().is_empty() && !game.install_dir.exists() {
+                    widgets::status_pill(ui, "Install missing", Palette::DANGER);
+                }
             });
 
-            ui.add_space(14.0);
+            ui.add_space(space::LG);
 
             // Actions.
             let width = ui.available_width();
-            if widgets::primary_button(ui, "▶   Launch", width).clicked() {
+            if widgets::primary_button(ui, "Launch", width).clicked() {
                 app.launch(&id);
             }
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             ui.horizontal(|ui| {
                 let fav_label = if app.config.is_favorite(&id) {
                     "★  Favourite"
@@ -115,7 +114,7 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                 if widgets::secondary_button(ui, fav_label).clicked() {
                     app.toggle_favorite(&id);
                 }
-                if widgets::secondary_button(ui, "⧉  Copy id").clicked() {
+                if widgets::secondary_button(ui, "Copy id").clicked() {
                     ui.ctx().copy_text(game.id.clone());
                     app.notify("Game id copied");
                 }
@@ -124,63 +123,64 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             // A title that is owned but not installed is invisible to the
             // scanner, so reaching its storefront from the library is the way
             // back to it — and to buying it, when it is not owned yet.
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if widgets::secondary_button(ui, "🛒  Open store page").clicked() {
-                    match crate::stores::open_store_page(&game) {
-                        Ok(()) => app.notify("Opening the store page in your browser"),
-                        Err(e) => app.notify_error(&format!("Could not open the browser: {e}")),
-                    }
+            ui.add_space(space::SM);
+            if widgets::secondary_button(ui, "Open store page").clicked() {
+                match crate::stores::open_store_page(&game) {
+                    Ok(()) => app.notify("Opening the store page in your browser"),
+                    Err(e) => app.notify_error(&format!("Could not open the browser: {e}")),
                 }
+            }
 
-                // Downloading without the store client is delegated to the
-                // community downloader for that store. When it is missing the
-                // button still explains what to install, rather than hiding
-                // the capability.
-                let installer = crate::stores::installer(game.store);
-                let installed = installer.find().is_some();
-                let label = if installed {
-                    format!("⤓  Install with {}", installer.program)
-                } else {
-                    "⤓  Install without the client".to_string()
-                };
-                if widgets::secondary_button(ui, &label).clicked() {
-                    if !installed {
-                        app.notify_error(&format!(
-                            "{} is not installed — see {}",
-                            installer.program, installer.homepage
-                        ));
-                    } else {
-                        match installer.install(&game) {
-                            Ok(log) => app.notify(&format!(
-                                "Installing in the background · log: {}",
-                                log.display()
-                            )),
-                            Err(e) => app.notify_error(&format!("Install failed: {e}")),
-                        }
+            // Downloading without the store client is delegated to the
+            // community downloader for that store. A downloader IonLauncher
+            // fetched itself counts as installed, so `executable()` — not
+            // `find()` — decides, matching what `install()` actually runs.
+            let installer = crate::stores::installer(game.store);
+            let ready = installer.executable().is_some();
+            let label = if ready {
+                format!("Install with {}", installer.program)
+            } else {
+                "Install without the client".to_string()
+            };
+            ui.add_space(space::SM);
+            if widgets::secondary_button(ui, &label).clicked() {
+                if ready {
+                    match installer.install(&game) {
+                        Ok(log) => app.notify(&format!(
+                            "Installing in the background · log: {}",
+                            log.display()
+                        )),
+                        Err(e) => app.notify_error(&format!("Install failed: {e}")),
                     }
+                } else if installer.downloadable() {
+                    app.download_downloader(game.store);
+                } else {
+                    app.notify_error(&format!(
+                        "{} is not installed — see {}",
+                        installer.program, installer.homepage
+                    ));
                 }
-            });
+            }
 
             // When the downloader is missing, showing the exact command is
             // more useful than a dead end: it can be run once it is installed.
             let installer = crate::stores::installer(game.store);
-            if installer.find().is_none() {
-                ui.add_space(4.0);
+            if installer.executable().is_none() {
+                ui.add_space(space::XS);
                 ui.label(
                     RichText::new(installer.install_command(&game))
-                        .size(11.0)
+                        .size(text::XS)
                         .monospace()
                         .color(Palette::TEXT_FAINT),
                 );
             }
 
-            ui.add_space(16.0);
+            ui.add_space(space::XL);
             widgets::section_heading(ui, "Statistics");
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             egui::Grid::new("stats-grid")
                 .num_columns(2)
-                .spacing(Vec2::new(18.0, 10.0))
+                .spacing(Vec2::new(space::LG, space::MD))
                 .show(ui, |ui| {
                     if let Some(playtime) = game.playtime_label() {
                         widgets::stat(ui, "PLAYTIME", &playtime);
@@ -199,9 +199,9 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                     ui.end_row();
                 });
 
-            ui.add_space(16.0);
+            ui.add_space(space::XL);
             widgets::section_heading(ui, "Installation");
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
 
             let install_text = if game.install_dir.as_os_str().is_empty() {
                 "not reported by the store".to_string()
@@ -210,27 +210,29 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
             };
             ui.label(
                 RichText::new(install_text)
-                    .size(11.5)
+                    .size(text::XS)
+                    .monospace()
                     .color(Palette::TEXT_MUTED),
             );
             if !game.install_dir.as_os_str().is_empty() && !game.install_dir.exists() {
-                ui.add_space(4.0);
+                ui.add_space(space::XS);
                 ui.label(
                     RichText::new("⚠  This folder no longer exists on disk")
-                        .size(11.5)
+                        .size(text::XS)
                         .color(Palette::DANGER),
                 );
             }
 
-            ui.add_space(16.0);
+            ui.add_space(space::XL);
             widgets::section_heading(ui, "How it launches");
-            ui.add_space(6.0);
+            ui.add_space(space::SM);
             ui.label(
                 RichText::new(widgets::launch_target_label(&game.launch))
-                    .size(11.0)
+                    .size(text::XS)
+                    .monospace()
                     .color(Palette::TEXT_FAINT),
             );
-            ui.add_space(4.0);
+            ui.add_space(space::XS);
             ui.label(
                 RichText::new(match &game.launch {
                     crate::model::LaunchTarget::Url(_) => {
@@ -241,11 +243,11 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                         "Started directly from its executable, bypassing the store client."
                     }
                 })
-                .size(11.0)
+                .size(text::XS)
                 .color(Palette::TEXT_FAINT),
             );
 
-            ui.add_space(20.0);
+            ui.add_space(space::XL);
         });
 
     if close || ui.ctx().input(|i| i.key_pressed(egui::Key::Escape)) {

@@ -86,6 +86,16 @@ app stores as `Vec<Game>`. The UI never touches the filesystem directly.
   These are plain functions taking `&mut IonApp` and `&mut Ui`; they are not
   widgets. `library::grid` and `library::list` are shared with the search page
   so both render results identically.
+- `theme.rs` — the single source of truth for the look. Spacing (`space`),
+  radius (`RADIUS_*`), the type scale (`text`), and colours (`Palette`) are
+  tokens; no screen hardcodes a size or colour. `theme::apply` builds the egui
+  style from them. A retune belongs here, not in a page. The accent is warm
+  amber, chosen to sit apart from every store brand.
+- `widgets.rs` — the card widget is hand-painted (one `allocate_exact_size`,
+  a few shapes, one texture) so hundreds of cards stay cheap on old GPUs.
+  `paint_cover` centre-crops artwork to the target aspect and masks the
+  corners, because `Painter::image` cannot round a texture.
+- `ui.rs` — panel frames, all built from the tokens.
 - `art.rs` — resolves a game's `ArtSource` list in order (disk cache, local
   store files, then network) and caches the decoded, downscaled cover to disk.
   Only the downscaled image reaches the GPU. Steam cover URLs are built from
