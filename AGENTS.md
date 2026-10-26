@@ -320,6 +320,25 @@ The user may not see the tool calls, so the last message has to stand alone.
   and fast; weigh every new crate against that.
 - Store-specific knowledge (file formats, registry keys, database schemas)
   belongs in `providers/`, not in the UI or model.
+- Storefront URLs and clientless installs live in `src/stores.rs`. Epic's
+  page slug is opaque, so its store link is a search, not a product page.
+
+## Testing the GUI
+
+The UI can be driven headlessly, which is how the store-page and install
+buttons were verified:
+
+- `Xvfb :99 -screen 0 1400x900x24 &`, then `openbox`, then the app with
+  `DISPLAY=:99`. Needed once: `xvfb xdotool imagemagick tesseract-ocr openbox
+  libxkbcommon-x11-0 libgl1 libegl1`.
+- Point `PATH` at a stub `xdg-open` that logs its argument to confirm which
+  URL a button opens, and a stub downloader to capture its argv.
+- The window must be activated before clicks register, and coordinates are
+  most reliable window-relative: `xdotool mousemove --window $WID X Y`.
+- Read the result with `import -window root shot.png` and `tesseract shot.png -`,
+  or with `tesseract shot.png out tsv` when exact button coordinates are needed.
+- A screenshot that does not change after a click means the window never got
+  focus; re-activate it rather than assuming the handler is broken.
 
 ## Git
 
