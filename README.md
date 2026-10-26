@@ -118,8 +118,13 @@ sudo apt install mingw-w64 nsis
 
 cargo build --release --target x86_64-pc-windows-gnu
 mkdir -p dist && cp target/x86_64-pc-windows-gnu/release/ionlauncher.exe dist/
-cd installer && makensis ionlauncher.nsi
+version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+cd installer && makensis -V2 -DAPP_VERSION="$version" ionlauncher.nsi
 ```
+
+The installer takes its version from `Cargo.toml` through `-DAPP_VERSION`, so
+the setup file cannot drift from the binary it wraps. Without the flag it
+falls back to the placeholder version in the script.
 
 The result is `dist/IonLauncher-<version>-Setup.exe`. The same steps run in
 [`.github/workflows/windows-installer.yml`](.github/workflows/windows-installer.yml),

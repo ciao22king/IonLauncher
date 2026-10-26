@@ -49,7 +49,11 @@ jobs:
       run: |
         mkdir -p dist
         cp target/x86_64-pc-windows-gnu/release/ionlauncher.exe dist/
-        cd installer && makensis -V2 ionlauncher.nsi
+        # The installer takes its version from Cargo.toml, so the setup file,
+        # the binary it wraps and the release tag cannot disagree.
+        version=$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
+        test -n "$version"
+        cd installer && makensis -V2 -DAPP_VERSION="$version" ionlauncher.nsi
 
     - name: Upload the installer
       uses: actions/upload-artifact@v4

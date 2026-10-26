@@ -20,9 +20,18 @@ Target amd64-unicode
 !define APP_NAME        "IonLauncher"
 !define APP_EXE         "ionlauncher.exe"
 !define APP_PUBLISHER   "IonLauncher"
-!define APP_VERSION     "0.1.0"
 !define APP_URL         "https://github.com/ciao22king/IonLauncher"
 !define UNINST_KEY      "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
+
+; The version lives in Cargo.toml, and the build passes it with
+; -DAPP_VERSION so the installer cannot drift from the binary it wraps. The
+; fallback keeps a bare `makensis ionlauncher.nsi` working.
+!ifndef APP_VERSION
+  !define APP_VERSION "0.1.0"
+!endif
+
+; VIProductVersion wants four numeric fields; the package version has three.
+!define APP_VERSION_4 "${APP_VERSION}.0"
 
 Name "${APP_NAME} ${APP_VERSION}"
 OutFile "..\dist\IonLauncher-${APP_VERSION}-Setup.exe"
@@ -32,7 +41,7 @@ RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 ShowInstDetails show
 
-VIProductVersion "0.1.0.0"
+VIProductVersion "${APP_VERSION_4}"
 VIAddVersionKey "ProductName"     "${APP_NAME}"
 VIAddVersionKey "FileDescription" "${APP_NAME} Setup"
 VIAddVersionKey "FileVersion"     "${APP_VERSION}"

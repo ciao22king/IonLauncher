@@ -233,6 +233,13 @@ The user may not see the tool calls, so the last message has to stand alone.
 - `installer/ionlauncher.nsi` is a MUI2 wizard. Verify it under Wine with a
   throwaway prefix, then drive the pages with `xdotool` and read the result
   from the filesystem; do not trust a screenshot alone.
+- The version is not written in the `.nsi`. The build extracts it from
+  `Cargo.toml` and passes `-DAPP_VERSION=...` to `makensis`, so the setup file
+  name and its embedded version metadata cannot drift from the binary. The
+  script keeps a placeholder behind `!ifndef` for a bare `makensis` run.
+  `VIProductVersion` needs four numeric fields, hence `APP_VERSION_4`.
+- `!define /file` looks tempting for reading `Cargo.toml` directly, but it
+  captures the trailing newline and breaks the following `!searchparse`.
 - Keep nsDialogs control handles in `Var`s, never in `$0`-`$9`. MUI reuses
   those registers between pages, so a handle kept there is clobbered before the
   leave function reads it and the user's shortcut choice is silently lost.
