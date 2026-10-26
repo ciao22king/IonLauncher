@@ -422,7 +422,11 @@ pub fn parse_gog_art_urls(body: &str) -> Vec<String> {
 fn fetch(url: &str) -> Option<Vec<u8>> {
     let agent = ureq::AgentBuilder::new()
         .timeout(FETCH_TIMEOUT)
-        .user_agent("IonLauncher/0.1 (+https://github.com/ciao22king/IonLauncher)")
+        .user_agent(concat!(
+            "IonLauncher/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/ciao22king/IonLauncher)"
+        ))
         .build();
     let response = agent.get(url).call().ok()?;
     // Guard against a redirect loop or a mislabelled huge file.

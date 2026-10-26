@@ -17,10 +17,12 @@ cargo build --release          # ~5 MB stripped binary
 cargo test                     # unit tests
 cargo run -- --demo            # GUI with the built-in sample library
 cargo run -- --print-library   # headless: print the detected library and exit
+cargo run -- --check-updates   # headless: ask GitHub for a newer release
 ```
 
 `--print-library` is the fastest way to check provider changes: it needs no
-display and no real store installation.
+display and no real store installation. `--check-updates` is the same for the
+updater: it exercises the real HTTP path and prints the outcome.
 
 ## Testing on a headless machine
 
@@ -279,6 +281,27 @@ The user may not see the tool calls, so the last message has to stand alone.
 - `cargo check --target x86_64-apple-darwin` fails on Linux inside `ring`'s C
   code, which needs an Apple SDK. The Rust code itself type-checks; shim `cc`
   and `ar` on `PATH` to prove it.
+
+## Updates and releases
+
+- The updater (`src/update.rs`) reads `releases/latest` from the public GitHub
+  API and compares `tag_name` with `CARGO_PKG_VERSION`. Drafts and
+  pre-releases are skipped, so staging a release does not push it to users.
+- Version comparison must be numeric, not lexical: `1.10.0` is newer than
+  `1.9.0`, but sorts before it as a string. The tests cover this.
+- Asset selection matches the names the packaging workflows publish:
+  `IonLauncher-*-Setup.exe`, `IonLauncher-*.dmg`, `ionlauncher-*-x86_64.AppImage`
+  (with the `.deb` as the Linux fallback). Change a workflow's output name and
+  the updater stops finding it, so change both together.
+- Downloading never installs. The file goes to `IonLauncher-updates` in the
+  user's download directory and they run it themselves.
+- `.github/workflows/{windows,linux,macos}-*.yml` declare
+  `permissions: contents: write`. Without it `softprops/action-gh-release`
+  cannot create the release and the job fails at the tag.
+- A tag matching `v*` is what publishes a release and attaches the artifacts.
+  Pushing to `main` runs the workflows but uploads nothing.
+- A repository with no releases answers the API with 404; the updater treats
+  that as "up to date" rather than an error.
 
 ## Style
 

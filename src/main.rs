@@ -18,6 +18,7 @@ mod providers;
 mod sqlite;
 mod theme;
 mod ui;
+mod update;
 mod util;
 mod vdf;
 mod widgets;
@@ -29,6 +30,7 @@ use config::Config;
 struct Args {
     demo: bool,
     print_library: bool,
+    check_updates: bool,
     help: bool,
     version: bool,
 }
@@ -39,6 +41,7 @@ fn parse_args() -> Args {
         match arg.as_str() {
             "--demo" | "-d" => args.demo = true,
             "--print-library" | "--list" => args.print_library = true,
+            "--check-updates" => args.check_updates = true,
             "--help" | "-h" => args.help = true,
             "--version" | "-V" => args.version = true,
             _ => {}
@@ -57,6 +60,7 @@ USAGE:
 OPTIONS:
     -d, --demo             Start with the built-in sample library
         --print-library    Print the detected library to stdout and exit
+        --check-updates    Check GitHub for a newer release and exit
     -h, --help             Show this message
     -V, --version          Show the version
 ",
@@ -74,6 +78,9 @@ fn main() -> eframe::Result<()> {
     if args.version {
         println!("IonLauncher {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+    if args.check_updates {
+        return check_updates();
     }
 
     let mut config = Config::load();
@@ -108,6 +115,35 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app::IonApp::new(config)))
         }),
     )
+}
+
+/// Checks GitHub for a newer release and prints the result, then exits.
+///
+/// Headless counterpart to the button in Settings, so the update path can be
+/// verified on a machine with no display.
+fn check_updates() -> eframe::Result<()> {
+    let current = update::current_version();
+    match update::check() {
+        Ok(Some(found)) => {
+            println!(
+                "IonLauncher {current} — update available: {}",
+                found.version
+            );
+            match (&found.asset_name, &found.asset_url) {
+                (Some(name), Some(_)) => {
+                    println!("  download: {name} ({})", found.size_label());
+                }
+                _ => println!("  no installer for this platform; see {}", found.page_url),
+            }
+            println!("  release:  {}", found.page_url);
+        }
+        Ok(None) => println!("IonLauncher {current} — up to date"),
+        Err(err) => {
+            println!("IonLauncher {current} — check failed: {err}");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
 }
 
 /// Prints the library as plain text and returns without opening a window.
@@ -179,7 +215,13 @@ mod tests {
     #[test]
     fn help_text_documents_every_flag() {
         let text = help_text();
-        for flag in ["--demo", "--print-library", "--help", "--version"] {
+        for flag in [
+            "--demo",
+            "--print-library",
+            "--check-updates",
+            "--help",
+            "--version",
+        ] {
             assert!(text.contains(flag), "help is missing {flag}");
         }
     }

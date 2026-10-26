@@ -86,6 +86,15 @@ pub struct Config {
     /// Name of the Proton build to use, matched against the directory name.
     /// `None` means "pick automatically".
     pub proton_version: Option<String>,
+    /// Ask GitHub for a newer release on startup.
+    ///
+    /// On by default: a launcher that never tells you an update exists leaves
+    /// people on old builds, and this is the only channel IonLauncher has.
+    /// It is a single request to the public releases API, with nothing sent
+    /// but the request itself.
+    pub check_updates: bool,
+    /// Version the user chose to skip, so the banner stops nagging.
+    pub skipped_version: Option<String>,
 }
 
 impl Default for Config {
@@ -107,6 +116,8 @@ impl Default for Config {
             favorites: Vec::new(),
             proton_enabled: false,
             proton_version: None,
+            check_updates: default_true(),
+            skipped_version: None,
         }
     }
 }
@@ -219,6 +230,23 @@ mod tests {
         }
         assert_eq!(cfg.sort, SortMode::RecentlyPlayed);
         assert_eq!(cfg.view, ViewMode::Grid);
+    }
+
+    #[test]
+    fn update_checks_are_on_by_default_and_persist() {
+        let cfg = Config::default();
+        assert!(cfg.check_updates, "updates should be checked by default");
+        assert_eq!(cfg.skipped_version, None);
+
+        let cfg = Config {
+            check_updates: false,
+            skipped_version: Some("1.2.3".into()),
+            ..Config::default()
+        };
+        let text = serde_json::to_string(&cfg).unwrap();
+        let back: Config = serde_json::from_str(&text).unwrap();
+        assert!(!back.check_updates);
+        assert_eq!(back.skipped_version.as_deref(), Some("1.2.3"));
     }
 
     #[test]

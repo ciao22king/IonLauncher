@@ -6,7 +6,70 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Progress of a background transfer, shared with the UI thread.
+///
+/// The worker writes and the UI reads once per frame, so every field is
+/// atomic or a short-lived lock. Nothing here blocks the caller.
+#[derive(Debug, Default)]
+pub struct DownloadProgress {
+    /// Bytes written so far.
+    pub written: AtomicU64,
+    /// Total bytes, or 0 when the server did not say.
+    pub total: AtomicU64,
+    /// Set to a message when the transfer fails.
+    pub error: Mutex<Option<String>>,
+    /// Set to the outcome to show when the transfer succeeds.
+    pub message: Mutex<Option<String>>,
+    /// Set when the transfer finished, successfully or not.
+    pub done: AtomicBool,
+}
+
+impl DownloadProgress {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    pub fn fraction(&self) -> f32 {
+        let total = self.total.load(Ordering::Relaxed);
+        if total == 0 {
+            return 0.0;
+        }
+        let written = self.written.load(Ordering::Relaxed);
+        (written as f32 / total as f32).clamp(0.0, 1.0)
+    }
+
+    pub fn is_done(&self) -> bool {
+        self.done.load(Ordering::Relaxed)
+    }
+
+    pub fn error(&self) -> Option<String> {
+        self.error.lock().ok().and_then(|e| e.clone())
+    }
+
+    pub fn message(&self) -> Option<String> {
+        self.message.lock().ok().and_then(|m| m.clone())
+    }
+
+    /// Marks the transfer finished and records why it failed.
+    pub fn set_error(&self, message: String) {
+        if let Ok(mut slot) = self.error.lock() {
+            *slot = Some(message);
+        }
+        self.done.store(true, Ordering::Relaxed);
+    }
+
+    /// Marks the transfer finished successfully, with a line to show the user.
+    pub fn finish(&self, message: String) {
+        if let Ok(mut slot) = self.message.lock() {
+            *slot = Some(message);
+        }
+        self.done.store(true, Ordering::Relaxed);
+    }
+}
 
 /// Reads a file as UTF-8, refusing anything larger than `max_bytes`.
 ///

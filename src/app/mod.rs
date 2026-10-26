@@ -68,6 +68,22 @@ pub struct IonApp {
     pub proton_download: Option<(String, std::sync::Arc<crate::proton::DownloadProgress>)>,
     /// Receive channel for the background release listing.
     pub proton_release_rx: Option<Receiver<Result<Vec<crate::proton::Release>, String>>>,
+    /// Newer release found on GitHub, if any.
+    pub update_available: Option<crate::update::Update>,
+    /// Set while the update check is in flight.
+    pub update_checking: bool,
+    /// Why the last check failed, if it did.
+    pub update_error: Option<String>,
+    /// Result of the last check, so "up to date" can be shown once.
+    pub update_checked: bool,
+    /// Whether the in-flight check was started by the user.
+    pub update_manual: bool,
+    /// In-flight update download and its progress.
+    pub update_download: Option<std::sync::Arc<crate::util::DownloadProgress>>,
+    /// Path of a downloaded installer, ready to run.
+    pub update_ready: Option<String>,
+    /// Receive channel for the background update check.
+    pub update_rx: Option<Receiver<Result<Option<crate::update::Update>, String>>>,
 }
 
 /// Cached result of filtering and sorting, so the grid does not re-sort
@@ -119,9 +135,20 @@ impl IonApp {
             proton_fetching_releases: false,
             proton_download: None,
             proton_release_rx: None,
+            update_available: None,
+            update_checking: false,
+            update_error: None,
+            update_checked: false,
+            update_manual: false,
+            update_download: None,
+            update_ready: None,
+            update_rx: None,
         };
         app.rescan();
         app.refresh_proton();
+        // Started here rather than from the Settings screen so an update is
+        // known about as soon as the window opens, wherever the user lands.
+        app.check_for_updates(false);
         app
     }
 
@@ -180,6 +207,95 @@ impl IonApp {
                 self.notify(&format!("{tag} installed"));
             }
         }
+    }
+
+    /// Starts an update check on a worker thread.
+    ///
+    /// `manual` distinguishes a click on "Check now" from the automatic check
+    /// at startup: only the manual one reports "you are up to date", because
+    /// nobody wants that message on every launch.
+    pub fn check_for_updates(&mut self, manual: bool) {
+        if self.update_checking {
+            return;
+        }
+        // A check the user turned off must stay off, except when they ask.
+        if !manual && !self.config.check_updates {
+            return;
+        }
+        self.update_checking = true;
+        self.update_error = None;
+        if manual {
+            self.update_checked = false;
+        }
+        self.update_manual = manual;
+
+        let (tx, rx) = channel();
+        self.update_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::update::check());
+        });
+    }
+
+    /// Collects the update check result and any finished download.
+    pub fn poll_update(&mut self) {
+        if let Some(rx) = &self.update_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.update_checking = false;
+                self.update_rx = None;
+                self.update_checked = true;
+                let manual = self.update_manual;
+                match result {
+                    Ok(Some(found)) => {
+                        // A version the user skipped stays skipped, unless
+                        // they asked again.
+                        let skipped =
+                            self.config.skipped_version.as_deref() == Some(found.version.as_str());
+                        if manual || !skipped {
+                            self.update_available = Some(found);
+                        }
+                    }
+                    Ok(None) => {
+                        self.update_available = None;
+                        if manual {
+                            self.notify("You are on the latest version");
+                        }
+                    }
+                    Err(err) => {
+                        self.update_error = Some(err.clone());
+                        if manual {
+                            self.notify_error(&format!("Update check failed: {err}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        let finished = self
+            .update_download
+            .as_ref()
+            .is_some_and(|progress| progress.is_done());
+        if finished {
+            let progress = self.update_download.take().expect("checked above");
+            if let Some(err) = progress.error() {
+                self.notify_error(&format!("Could not download the update: {err}"));
+            } else if let Some(path) = progress.message() {
+                self.update_ready = Some(path);
+                self.notify("Update downloaded — run the installer to finish");
+            }
+        }
+    }
+
+    /// Downloads the available update in the background.
+    pub fn download_update(&mut self) {
+        let Some(update) = self.update_available.clone() else {
+            return;
+        };
+        if self.update_download.is_some() {
+            return;
+        }
+        let progress = crate::util::DownloadProgress::new();
+        self.update_download = Some(progress.clone());
+        crate::update::download(update, progress);
     }
 
     /// The Proton build launches should use, if any.
@@ -428,6 +544,7 @@ impl eframe::App for IonApp {
         self.poll_scan();
         self.poll_artwork(&ctx);
         self.poll_proton();
+        self.poll_update();
         self.refresh_view();
         self.paint_toast(&ctx);
         self.handle_shortcuts(&ctx);
@@ -527,6 +644,8 @@ impl IonApp {
         let busy = self.scanning
             || self.proton_fetching_releases
             || self.proton_download.is_some()
+            || self.update_checking
+            || self.update_download.is_some()
             || self.toast.is_some()
             || self.games.iter().any(|g| g.art_pending);
         if busy {

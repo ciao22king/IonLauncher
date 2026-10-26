@@ -64,7 +64,7 @@ Two packages are published, both for x86_64.
 **Debian package.** Download `ionlauncher_<version>_amd64.deb` and install it:
 
 ```sh
-sudo apt install ./ionlauncher_0.1.0_amd64.deb
+sudo apt install ./ionlauncher_1.0.0_amd64.deb
 ```
 
 This puts the binary in `/usr/bin`, adds IonLauncher to your applications menu
@@ -75,8 +75,8 @@ Remove it with `sudo apt remove ionlauncher`.
 executable and run it:
 
 ```sh
-chmod +x ionlauncher-0.1.0-x86_64.AppImage
-./ionlauncher-0.1.0-x86_64.AppImage
+chmod +x ionlauncher-1.0.0-x86_64.AppImage
+./ionlauncher-1.0.0-x86_64.AppImage
 ```
 
 The AppImage needs no installation and no root, which suits a machine you do
@@ -177,6 +177,7 @@ ionlauncher [OPTIONS]
 
   --demo            Show the built-in sample library
   --print-library   Print the detected library and exit (no window)
+  --check-updates   Check GitHub for a newer release and exit
   --version         Print the version
   --help            Print this help
 ```
@@ -190,6 +191,27 @@ IonLauncher library (3 games)
 
   Team Fortress 2        Steam      1560 h    24.0 GB  steam://runsappid/440
   Portal 2               Steam        60 h    12.0 GB  steam://runsappid/620
+```
+
+## Updates
+
+IonLauncher is not in any app store, so it checks for new versions itself. On
+startup it asks the GitHub releases API whether a newer release exists, and
+shows a banner in Settings → Updates if one does.
+
+- The check is a single request to the public releases page. Nothing about you
+  or your library is sent, and there is no telemetry.
+- Downloading an update never installs it silently. The installer is saved to
+  `IonLauncher-updates` in your downloads folder, and you choose when to run
+  it — the same file you would have downloaded from the releases page.
+- Only stable releases are offered; drafts and pre-releases are ignored.
+- Turn the startup check off in Settings, or skip a single version you do not
+  want to be reminded about.
+
+From a terminal, without opening a window:
+
+```sh
+ionlauncher --check-updates
 ```
 
 ## How detection works

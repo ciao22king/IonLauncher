@@ -39,6 +39,8 @@ pub fn show(app: &mut IonApp, ui: &mut egui::Ui) {
                     ui.add_space(14.0);
                     library_section(app, ui);
                     ui.add_space(14.0);
+                    updates_section(app, ui);
+                    ui.add_space(14.0);
                     // Proton only exists on Linux, so the section is hidden
                     // entirely elsewhere rather than shown greyed out.
                     #[cfg(target_os = "linux")]
@@ -526,6 +528,182 @@ fn proton_download_list(app: &mut IonApp, ui: &mut egui::Ui) {
 
         ui.add_space(6.0);
     }
+}
+
+/// Updates: the only channel this launcher has to tell you a new build exists.
+fn updates_section(app: &mut IonApp, ui: &mut egui::Ui) {
+    crate::ui::card_frame().show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        widgets::section_heading(ui, "Updates");
+        ui.add_space(8.0);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("IonLauncher {}", crate::update::current_version()))
+                    .size(12.5)
+                    .color(Palette::TEXT),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if app.update_checking {
+                    ui.spinner();
+                    ui.label(
+                        RichText::new("Checking…")
+                            .size(11.5)
+                            .color(Palette::TEXT_MUTED),
+                    );
+                } else if widgets::secondary_button(ui, "Check now").clicked() {
+                    app.check_for_updates(true);
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+        let mut enabled = app.config.check_updates;
+        if ui
+            .checkbox(&mut enabled, "Check for updates on startup")
+            .changed()
+        {
+            app.config.check_updates = enabled;
+            app.config_dirty = true;
+        }
+        ui.label(
+            RichText::new(
+                "One request to the public GitHub releases page. Nothing else is sent, and \
+                 downloading an update never installs it without asking.",
+            )
+            .size(10.5)
+            .color(Palette::TEXT_FAINT),
+        );
+
+        // An in-flight download owns the card: showing the banner underneath
+        // would invite a second click on a download already running.
+        if let Some(progress) = app.update_download.clone() {
+            ui.add_space(10.0);
+            let fraction = progress.fraction();
+            let text = if progress.total.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+                "starting…".to_string()
+            } else {
+                format!("{:.0}%", fraction * 100.0)
+            };
+            ui.label(
+                RichText::new("Downloading the update…")
+                    .size(12.0)
+                    .color(Palette::TEXT),
+            );
+            ui.add_space(4.0);
+            ui.add(
+                egui::ProgressBar::new(fraction)
+                    .desired_width(ui.available_width())
+                    .text(text),
+            );
+            return;
+        }
+
+        // Downloaded and waiting: the file is in the download folder, and the
+        // last step is the user's to take.
+        if let Some(path) = app.update_ready.clone() {
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new("Ready to install")
+                    .size(12.5)
+                    .strong()
+                    .color(Palette::OK),
+            );
+            ui.add_space(2.0);
+            ui.label(RichText::new(&path).size(10.5).color(Palette::TEXT_FAINT));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                if widgets::secondary_button(ui, "Run installer").clicked() {
+                    match crate::update::run_installer(&path) {
+                        Ok(()) => app.notify("Installer opened — follow its steps"),
+                        Err(err) => app.notify_error(&format!("Could not run it: {err}")),
+                    }
+                }
+                if widgets::secondary_button(ui, "Open folder").clicked() {
+                    if let Some(parent) = std::path::Path::new(&path).parent() {
+                        let _ = crate::util::open_url(&parent.display().to_string());
+                    }
+                }
+            });
+            return;
+        }
+
+        let Some(update) = app.update_available.clone() else {
+            if app.update_error.is_some() {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("The last check could not reach GitHub.")
+                        .size(11.0)
+                        .color(Palette::TEXT_MUTED),
+                );
+            } else if app.update_checked && !app.update_checking {
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new("You are on the latest version.")
+                        .size(11.0)
+                        .color(Palette::TEXT_MUTED),
+                );
+            }
+            return;
+        };
+
+        ui.add_space(10.0);
+        ui.label(
+            RichText::new(format!("Version {} is available", update.version))
+                .size(12.5)
+                .strong()
+                .color(Palette::ACCENT),
+        );
+        if update.size_bytes > 0 {
+            ui.add_space(2.0);
+            ui.label(
+                RichText::new(format!("Download size: {}", update.size_label()))
+                    .size(10.5)
+                    .color(Palette::TEXT_FAINT),
+            );
+        }
+
+        if !update.notes.trim().is_empty() {
+            ui.add_space(6.0);
+            // Release notes can be long; cap the height so the card cannot
+            // push the rest of the settings off-screen.
+            egui::ScrollArea::vertical()
+                .id_salt("update-notes")
+                .max_height(120.0)
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(update.notes.trim())
+                            .size(11.0)
+                            .color(Palette::TEXT_MUTED),
+                    );
+                });
+        }
+
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if update.asset_url.is_some() {
+                if widgets::secondary_button(ui, "Download update").clicked() {
+                    app.download_update();
+                }
+            } else {
+                // No file for this platform: the release page is the only way.
+                if widgets::secondary_button(ui, "Open release page").clicked() {
+                    let _ = crate::util::open_url(&update.page_url);
+                }
+                ui.label(
+                    RichText::new("No installer for this platform yet.")
+                        .size(10.5)
+                        .color(Palette::TEXT_FAINT),
+                );
+            }
+            if widgets::secondary_button(ui, "Skip this version").clicked() {
+                app.config.skipped_version = Some(update.version.clone());
+                app.config_dirty = true;
+                app.update_available = None;
+                app.notify("Version skipped");
+            }
+        });
+    });
 }
 
 fn about_section(app: &mut IonApp, ui: &mut egui::Ui) {

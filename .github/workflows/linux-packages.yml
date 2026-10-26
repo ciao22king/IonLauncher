@@ -11,6 +11,12 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+# The release step attaches build artifacts with GITHUB_TOKEN, which needs
+# write access to release contents. Set explicitly rather than relying on the
+# repository default, which may be read-only.
+permissions:
+  contents: write
+
 jobs:
   packages:
     runs-on: ubuntu-latest

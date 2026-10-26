@@ -24,7 +24,7 @@
 use crate::util;
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -249,47 +249,10 @@ pub fn install_dir() -> Option<PathBuf> {
 }
 
 /// Progress of an in-flight download, shared with the UI thread.
-#[derive(Debug, Default)]
-pub struct DownloadProgress {
-    /// Bytes written so far.
-    pub written: AtomicU64,
-    /// Total bytes, or 0 when the server did not say.
-    pub total: AtomicU64,
-    /// Set to a message when the download fails.
-    pub error: std::sync::Mutex<Option<String>>,
-    /// Set when the download and extraction finished.
-    pub done: std::sync::atomic::AtomicBool,
-}
-
-impl DownloadProgress {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
-    }
-
-    pub fn fraction(&self) -> f32 {
-        let total = self.total.load(Ordering::Relaxed);
-        if total == 0 {
-            return 0.0;
-        }
-        let written = self.written.load(Ordering::Relaxed);
-        (written as f32 / total as f32).clamp(0.0, 1.0)
-    }
-
-    pub fn is_done(&self) -> bool {
-        self.done.load(Ordering::Relaxed)
-    }
-
-    pub fn error(&self) -> Option<String> {
-        self.error.lock().ok().and_then(|e| e.clone())
-    }
-
-    fn set_error(&self, message: String) {
-        if let Ok(mut slot) = self.error.lock() {
-            *slot = Some(message);
-        }
-        self.done.store(true, Ordering::Relaxed);
-    }
-}
+///
+/// Alias for the shared [`util::DownloadProgress`], kept so the Proton call
+/// sites keep reading naturally.
+pub use crate::util::DownloadProgress;
 
 /// Downloads and extracts a release into `compatibilitytools.d`.
 ///
@@ -368,7 +331,11 @@ fn install_from_bytes(
 fn fetch(release: &Release, progress: &DownloadProgress) -> Result<Vec<u8>, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(600))
-        .user_agent("IonLauncher/0.1 (+https://github.com/ciao22king/IonLauncher)")
+        .user_agent(concat!(
+            "IonLauncher/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/ciao22king/IonLauncher)"
+        ))
         .build();
 
     let response = agent
@@ -545,7 +512,11 @@ pub fn data_dir() -> Option<PathBuf> {
 pub fn fetch_releases() -> Result<Vec<Release>, String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(20))
-        .user_agent("IonLauncher/0.1 (+https://github.com/ciao22king/IonLauncher)")
+        .user_agent(concat!(
+            "IonLauncher/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/ciao22king/IonLauncher)"
+        ))
         .build();
     let url = format!("https://api.github.com/repos/{GE_REPO}/releases?per_page=40");
     let response = agent
